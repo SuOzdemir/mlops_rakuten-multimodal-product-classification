@@ -1,0 +1,58 @@
+﻿# ============================================================
+# .gitignore – Rakuten Multimodal Project
+# ============================================================
+
+# Python
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+*.pyo
+*.pt
+*.lock
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Data (never commit raw data)
+data/
+01_DATA/
+private/
+
+# Logs
+*.log
+
+# ── Model weights & large binaries ─────────────────────────
+*.pt
+*.pth
+*.ckpt
+
+# ── Large output files ──────────────────────────────────────
+outputs/**/*.npy       # Feature exports (kann GB groß sein)
+outputs/**/*.pt
+outputs/**/*.pth
+
+# ── Figures (zu groß / reproduzierbar) ─────────────────────
+figures/
+
+# ── Alte / duplizierte Output-Ordner (nur History bleibt) ──
+outputs/E2_resnet50_partial_unfrozen_224_aug/
+outputs/F_resnet50_full_unfrozen_224_aug/
+outputs/resnet50_partial_unfrozen_224_aug/
+outputs/convnext_base_final/
+outputs/convnext_base_final_v1/
+outputs/convnext_tiny_full_aug_v1/
+outputs/camembert_outputs/
+outputs/Model_I11_ConvNeXt_Base_FullUnfreeze_224_Aug/
+outputs/Model_T8_CamemBERT_Partial_lokal/
+outputs/Fusion_Intermediate_ConvNeXt_CamemBERT/
+outputs/Fusion_Intermediate_Optimized/
+
+# ── Projektdateien ──────────────────────────────────────────
+project_tree.txt
+pyproject.toml.backup
+migrate_files.ps1
+migrate_files.py
