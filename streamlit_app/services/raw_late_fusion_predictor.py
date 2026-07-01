@@ -1,16 +1,3 @@
-# ============================================================
-# services/raw_late_fusion_predictor.py
-# Offline late-fusion predictor:
-#   - ConvNeXt-Base image model
-#   - CamemBERT text model
-#   - Raw text input: designation + description
-#
-# Supports:
-#   - text only
-#   - image only
-#   - text + image late fusion
-# ============================================================
-
 import json
 from pathlib import Path
 
@@ -25,40 +12,26 @@ from transformers import AutoTokenizer, CamembertForSequenceClassification
 # ------------------------------------------------------------
 # Paths
 # ------------------------------------------------------------
-# This service file is expected at:
-#   app/services/raw_late_fusion_predictor.py
-#
-# Your shared data folder is:
-#   app_parent/data/
-#
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 
 ASSET_DIR = DATA_DIR / "rakuten_streamlit_predictor"
 
-LABEL2ID_PATH = ASSET_DIR / "label2id.json"
 CATEGORY_MAPPING_PATH = ASSET_DIR / "prdtypecode_mapping.json"
-
 IMAGE_WEIGHTS_PATH = ASSET_DIR / "image_model" / "best_model_base.pt"
-
-TEXT_WEIGHTS_PATH = ASSET_DIR / "text_model" / "best_model_text.pt"
-CAMEMBERT_LOCAL_DIR = ASSET_DIR / "text_model" / "camembert_base"
+TEXT_MODEL_DIR = ASSET_DIR / "text_model" / "camembert_run4"
 
 
 # ------------------------------------------------------------
-# Model settings from original training
+# Model settings
 # ------------------------------------------------------------
 IMAGE_SIZE = 224
 TEXT_MAX_LENGTH = 128
-IMAGE_DROPOUT = 0.0  # saved image head is a single Linear layer, no dropout module
 
 DEFAULT_IMAGE_WEIGHT = 0.45
 DEFAULT_TEXT_WEIGHT = 0.55
 
-DEVICE = torch.device(
-    "cuda" if torch.cuda.is_available()
-    else "cpu"
-)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # ------------------------------------------------------------
@@ -75,19 +48,9 @@ IMAGE_TRANSFORM = transforms.Compose([
 
 
 # ------------------------------------------------------------
-# Model builders
+# Model builder
 # ------------------------------------------------------------
 def build_convnext_base(num_classes: int) -> nn.Module:
-    """
-    Rebuild the ConvNeXt-Base architecture used by the saved image weights.
-
-    Important:
-    The saved checkpoint has:
-        classifier.2.weight
-        classifier.2.bias
-
-    So the final head must be a single Linear layer, not a Sequential head.
-    """
     model = models.convnext_base(weights=None)
     n_features = model.classifier[2].in_features
     model.classifier[2] = nn.Linear(n_features, num_classes)
@@ -105,26 +68,19 @@ def load_json(path: Path) -> dict:
 # Asset loading
 # ------------------------------------------------------------
 def load_assets() -> dict:
-    """
-    Load all models and mappings once.
-
-    Use with st.cache_resource in Streamlit.
-    """
     for path in [
-        LABEL2ID_PATH,
         CATEGORY_MAPPING_PATH,
         IMAGE_WEIGHTS_PATH,
-        TEXT_WEIGHTS_PATH,
-        CAMEMBERT_LOCAL_DIR / "config.json",
-        CAMEMBERT_LOCAL_DIR / "model.safetensors",
-        CAMEMBERT_LOCAL_DIR / "sentencepiece.bpe.model",
-        CAMEMBERT_LOCAL_DIR / "tokenizer_config.json",
-        CAMEMBERT_LOCAL_DIR / "special_tokens_map.json",
+        TEXT_MODEL_DIR / "config.json",
+        TEXT_MODEL_DIR / "model.safetensors",
+        TEXT_MODEL_DIR / "label2id.json",
+        TEXT_MODEL_DIR / "tokenizer.json",
+        TEXT_MODEL_DIR / "tokenizer_config.json",
     ]:
         if not path.exists():
             raise FileNotFoundError(f"Missing required asset: {path}")
 
-    raw_label2id = load_json(LABEL2ID_PATH)
+    raw_label2id = load_json(TEXT_MODEL_DIR / "label2id.json")
     label2id = {int(k): int(v) for k, v in raw_label2id.items()}
     id2label = {v: k for k, v in label2id.items()}
 
@@ -133,32 +89,25 @@ def load_assets() -> dict:
 
     num_classes = len(label2id)
 
-    # -------------------------
     # Image model
-    # -------------------------
     image_model = build_convnext_base(num_classes)
-    image_state = torch.load(IMAGE_WEIGHTS_PATH, map_location="cpu")
+    image_state = torch.load(IMAGE_WEIGHTS_PATH, map_location="cpu", weights_only=True)
     image_model.load_state_dict(image_state)
     image_model.to(DEVICE)
     image_model.eval()
 
-    # -------------------------
-    # Text model, fully offline
-    # -------------------------
+    # Text model — loaded directly from full HuggingFace checkpoint
     tokenizer = AutoTokenizer.from_pretrained(
-        str(CAMEMBERT_LOCAL_DIR),
-        use_fast=False,
+        str(TEXT_MODEL_DIR),
         local_files_only=True,
     )
 
     text_model = CamembertForSequenceClassification.from_pretrained(
-        str(CAMEMBERT_LOCAL_DIR),
+        str(TEXT_MODEL_DIR),
         num_labels=num_classes,
         local_files_only=True,
+        ignore_mismatched_sizes=True,
     )
-
-    text_state = torch.load(TEXT_WEIGHTS_PATH, map_location="cpu")
-    text_model.load_state_dict(text_state)
     text_model.to(DEVICE)
     text_model.eval()
 
@@ -208,7 +157,6 @@ def predict_image_logits(image, assets: dict) -> torch.Tensor:
 @torch.no_grad()
 def predict_text_logits(designation: str, description: str, assets: dict) -> torch.Tensor:
     text = _prepare_text(designation, description)
-
     encoded = assets["tokenizer"](
         text,
         add_special_tokens=True,
@@ -218,14 +166,9 @@ def predict_text_logits(designation: str, description: str, assets: dict) -> tor
         return_attention_mask=True,
         return_tensors="pt",
     )
-
     input_ids = encoded["input_ids"].to(DEVICE)
     attention_mask = encoded["attention_mask"].to(DEVICE)
-
-    outputs = assets["text_model"](
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-    )
+    outputs = assets["text_model"](input_ids=input_ids, attention_mask=attention_mask)
     return outputs.logits
 
 
@@ -233,11 +176,6 @@ def predict_text_logits(designation: str, description: str, assets: dict) -> tor
 # Top-k formatting
 # ------------------------------------------------------------
 def logits_to_topk(logits: torch.Tensor, assets: dict, k: int = 3) -> list[dict]:
-    """
-    Convert logits to top-k predictions.
-
-    Confidence is softmax probability over the selected final logits.
-    """
     probs = torch.softmax(logits, dim=1).detach().cpu().numpy()[0]
     top_idx = np.argsort(probs)[::-1][:k]
 
@@ -246,7 +184,6 @@ def logits_to_topk(logits: torch.Tensor, assets: dict, k: int = 3) -> list[dict]
         prdtypecode = int(assets["id2label"][int(class_id)])
         category_name = assets["category_mapping"].get(prdtypecode, "Unknown category")
         confidence = float(probs[int(class_id)] * 100.0)
-
         results.append({
             "Rank": rank,
             "prdtypecode": prdtypecode,
@@ -270,14 +207,6 @@ def predict(
     image_weight: float = DEFAULT_IMAGE_WEIGHT,
     top_k: int = 3,
 ) -> dict:
-    """
-    Main prediction entry point.
-
-    Cases:
-    - text only: use CamemBERT logits
-    - image only: use ConvNeXt logits
-    - text + image: weighted late fusion
-    """
     text_available = _has_text(designation, description)
     image_available = image is not None
 

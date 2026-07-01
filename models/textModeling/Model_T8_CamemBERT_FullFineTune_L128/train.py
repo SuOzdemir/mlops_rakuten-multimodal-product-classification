@@ -18,10 +18,12 @@ import notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineT
 
 import gc
 import json
+import os
 import random
 import time
 from pathlib import Path
 
+import mlflow
 import numpy as np
 import pandas as pd
 import torch
@@ -67,6 +69,30 @@ def main() -> None:
     # ----------------------------------------------------------
     for d in [config.LOCAL_OUTPUT_ROOT, config.LOCAL_MODEL_ROOT, config.LOCAL_FIG_ROOT]:
         d.mkdir(parents=True, exist_ok=True)
+
+    # ----------------------------------------------------------
+    # 2b. MLflow setup
+    # ----------------------------------------------------------
+    _mlflow_active = False
+    try:
+        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+        mlflow.set_experiment("rakuten-text-modeling")
+        mlflow.start_run(run_name=config.RUN_NAME)
+        mlflow.log_params({
+            "architecture":            "CamemBERT-base",
+            "seed":                    config.SEED,
+            "max_length":              config.MAX_LENGTH,
+            "batch_size":              config.BATCH_SIZE,
+            "max_epochs":              config.MAX_EPOCHS,
+            "early_stopping_patience": config.EARLY_STOPPING_PATIENCE,
+            "learning_rate":           config.LEARNING_RATE,
+            "weight_decay":            config.WEIGHT_DECAY,
+            "feature_dim":             config.FEATURE_DIM,
+            "use_amp":                 config.USE_AMP,
+        })
+        _mlflow_active = True
+    except Exception as _e:
+        print(f"[MLflow] Tracking disabled: {_e}")
 
     # ----------------------------------------------------------
     # 3. Load splits & label mapping
@@ -201,6 +227,19 @@ def main() -> None:
             f"lr={current_lr:.2e}"
         )
 
+        if _mlflow_active:
+            mlflow.log_metrics({
+                "train_loss":        float(train_loss),
+                "val_loss":          float(val_loss),
+                "train_acc":         float(train_acc),
+                "val_acc":           float(val_acc),
+                "train_macro_f1":    float(train_macro_f1),
+                "val_macro_f1":      float(val_macro_f1),
+                "train_weighted_f1": float(train_weighted_f1),
+                "val_weighted_f1":   float(val_weighted_f1),
+                "lr":                float(current_lr),
+            }, step=epoch)
+
         save_full_checkpoint(
             config.LAST_CKPT_LOCAL, model, optimizer, scheduler,
             epoch, history, best_macro_f1, best_epoch, config.RUN_NAME,
@@ -244,10 +283,23 @@ def main() -> None:
         duration_min=total_minutes,
     )
 
+    if _mlflow_active:
+        mlflow.log_metric("best_macro_f1", best_macro_f1)
+        mlflow.log_metric("best_epoch", float(best_epoch))
+        mlflow.log_metric("duration_min", total_minutes)
+        mlflow.log_artifact(str(config.BEST_WEIGHTS_LOCAL))
+        mlflow.log_artifact(str(config.METADATA_JSON_LOCAL))
+
     # ----------------------------------------------------------
     # 10. Training curves
     # ----------------------------------------------------------
     plot_and_save_history(history, config.LOCAL_FIG_ROOT, best_epoch, best_macro_f1)
+
+    if _mlflow_active:
+        curves_png = config.LOCAL_FIG_ROOT / "training_curves.png"
+        if curves_png.exists():
+            mlflow.log_artifact(str(curves_png))
+        mlflow.end_run()
 
     # ----------------------------------------------------------
     # 11. Feature & logit export  (for fusion models)

@@ -1,0 +1,15 @@
+.git/
+.gitignore
+.gitattributes
+**/__pycache__/
+**/*.pyc
+**/.venv/
+.python-version
+uv.lock
+data/
+outputs/
+airflow_dst/
+docs/
+scripts/
+*.ipynb
+*.npy

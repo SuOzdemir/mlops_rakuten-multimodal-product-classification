@@ -9,7 +9,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pt
-*.lock
 
 # OS / Editor
 .DS_Store
@@ -50,6 +49,13 @@ outputs/Model_I11_ConvNeXt_Base_FullUnfreeze_224_Aug/
 outputs/Model_T8_CamemBERT_Partial_lokal/
 outputs/Fusion_Intermediate_ConvNeXt_CamemBERT/
 outputs/Fusion_Intermediate_Optimized/
+
+# ── MLflow ──────────────────────────────────────────────────
+mlruns/
+artifacts/
+
+# ── Credentials (never commit) ──────────────────────────────
+config/users.db
 
 # ── Projektdateien ──────────────────────────────────────────
 project_tree.txt
