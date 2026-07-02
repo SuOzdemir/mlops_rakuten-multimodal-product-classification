@@ -1,5 +1,30 @@
 services:
 
+  # Experiment tracking + Model Registry (Chapter 11).
+  # SQLite backend store (not plain file store) is required for Model
+  # Registry features (stages: Staging/Production, promotion rules).
+  # Independent of api/streamlit — `docker compose up mlflow` on its own,
+  # or `make up` to start the full stack (mlflow -> api -> streamlit).
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./mlruns:/mlflow/mlruns
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5001
+      --backend-store-uri sqlite:////mlflow/mlruns/mlflow.db
+      --default-artifact-root /mlflow/mlruns/artifacts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   api:
     build:
       context: .
