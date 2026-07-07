@@ -1,7 +1,28 @@
 services:
 
+  # Shared Postgres — backs both MLflow's tracking store (db: mlflow) and
+  # Airflow's metadata db (db: airflow, reached via host.docker.internal from
+  # the separate airflow_dst compose stack). Databases/users are created once
+  # on first boot by scripts/postgres_init/create_databases.sql.
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres_init/create_databases.sql:/docker-entrypoint-initdb.d/create_databases.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # Experiment tracking + Model Registry (Chapter 11).
-  # SQLite backend store (not plain file store) is required for Model
+  # Postgres backend store (not plain file store) is required for Model
   # Registry features (stages: Staging/Production, promotion rules).
   # Independent of api/streamlit — `docker compose up mlflow` on its own,
   # or `make up` to start the full stack (mlflow -> api -> streamlit).
@@ -15,8 +36,11 @@ services:
       mlflow server
       --host 0.0.0.0
       --port 5001
-      --backend-store-uri sqlite:////mlflow/mlruns/mlflow.db
+      --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
       --default-artifact-root /mlflow/mlruns/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
@@ -36,6 +60,10 @@ services:
       - ./config:/project/config
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow:5001
+      # Airflow lives in the separate airflow_dst compose stack (own network).
+      - AIRFLOW_API_URL=${AIRFLOW_API_URL:-http://host.docker.internal:8080}
+      - AIRFLOW_API_USER=${AIRFLOW_API_USER:-admin}
+      - AIRFLOW_API_PASSWORD=${AIRFLOW_API_PASSWORD:-admin}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -43,6 +71,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
   streamlit:
     build:
@@ -56,3 +109,8 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

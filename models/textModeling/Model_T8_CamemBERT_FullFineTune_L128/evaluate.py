@@ -8,7 +8,7 @@
 # ============================================================
 
 # config import MUST come before transformers to apply HF fixes
-import notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.config as config  # noqa: E402
+import models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.config as config  # noqa: E402
 
 import json
 from pathlib import Path
@@ -18,8 +18,8 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, CamembertForSequenceClassification
 
-from notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.dataset import RakutenTextDataset
-from notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.utils import evaluate_model
+from models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.dataset import RakutenTextDataset
+from models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.utils import evaluate_model
 
 
 def main() -> None:

@@ -92,8 +92,12 @@ with mlflow.start_run():
 
 ### UI
 
-MLflow UI is accessible at `http://localhost:5000` after `docker compose up`.  
+MLflow UI is accessible at `http://localhost:5001` after `docker compose up`.  
 All runs across models (ConvNeXt, CamemBERT, fusion experiments) can be compared side by side.
+
+MLflow's backend store is a shared Postgres instance (`postgres` service in `docker-compose.yaml`) —
+the same Postgres also backs Airflow's metadata DB (reached via `host.docker.internal` from the
+separate `airflow_dst` compose stack), so there's one database server instead of two SQLite files.
 
 ### Model promotion (Airflow DAG)
 
@@ -111,6 +115,27 @@ outputs/image_modeling/        →   label2id.json
 ```
 
 The DAG runs manually (triggered after training) and validates the serving directory before finishing.
+
+### Retrain pipeline (Airflow DAG + DVC + API)
+
+`POST /retrain` (admin only) doesn't run training itself — it triggers the Airflow DAG `rakuten_model_training` via Airflow's REST API, so the long-running job lives in Airflow (retries, logs, concurrency all handled there) instead of inside the FastAPI process.
+
+```
+POST /retrain {model: image|text}   (admin)
+   → API calls Airflow REST API: POST /api/v1/dags/rakuten_model_training/dagRuns
+        ↓
+   DAG: prepare_data (dvc repro prepare_splits)
+        ↓
+   DAG: train_model  (python -m models.<...>.train, model from dag_run conf)
+
+GET /retrain            → list all dag runs (any authenticated user)
+GET /retrain/{job_id}   → poll a specific dag run's status
+```
+
+- **`scripts/prepare_splits.py`** builds `outputs/image_modeling/{train_split,val_split}.csv` + `label2id.json` from the raw Kaggle CSVs (`data/raw/X_train.csv`, `Y_train.csv`) — both I12 and T8 read from the same split so image/text models are evaluated on identical held-out products.
+- **`dvc.yaml`** wraps that script as a pipeline stage (`prepare_splits`) — `dvc repro` only re-runs it if the raw data or script changed.
+- The Airflow container reaches the API's host via `AIRFLOW_API_URL` (default `http://host.docker.internal:8080`, since `airflow_dst` is a separate compose stack on its own network); Basic Auth uses the `admin`/`admin` user created by `airflow-init`.
+- Requires the raw Kaggle dataset in `data/raw/` (`./scripts/setup_data.sh`) — without it, `dvc repro` fails at the `prepare_data` task, which is expected until the dataset is downloaded on the machine running Airflow.
 
 ---
 
@@ -137,19 +162,28 @@ The DAG runs manually (triggered after training) and validates the serving direc
 
 ```
 .
-├── docker-compose.yaml              # MLflow + API + Streamlit
+├── docker-compose.yaml              # MLflow + API + Streamlit + Prometheus + Grafana
 ├── pyproject.toml                   # Python dependencies (uv) — dev/training env
 ├── Makefile                         # make up / airflow-up / test / health shortcuts
 ├── .github/workflows/ci.yml         # pytest + Docker build checks on push/PR
+├── dvc.yaml                         # DVC pipeline: raw CSVs -> train/val splits
+├── .dvc/                            # DVC metadata (dvc init)
 │
 ├── models/
 │   ├── Model_I12_ConvNeXt_Base_*/   # Image model training
 │   └── textModeling/
 │       └── Model_T8_CamemBERT_*/    # Text model training
 │
+├── scripts/
+│   ├── setup_data.sh                # Downloads raw Kaggle dataset -> data/raw/
+│   ├── prepare_splits.py            # DVC stage: builds train/val split CSVs + label2id.json
+│   ├── run_api.sh / run_streamlit.sh
+│
 ├── src/
 │   └── api/
-│       ├── main.py                  # FastAPI: /login /logout /predict
+│       ├── main.py                  # FastAPI: /login /logout /predict /retrain
+│       ├── retrain.py               # Calls Airflow REST API to trigger training DAG
+│       ├── db.py                    # SQLite user store
 │       ├── Dockerfile
 │       └── requirements.txt
 │
@@ -160,12 +194,17 @@ The DAG runs manually (triggered after training) and validates the serving direc
 │   └── services/
 │       └── raw_late_fusion_predictor.py  # ConvNeXt + CamemBERT fusion
 │
+├── monitoring/
+│   ├── prometheus/prometheus.yml     # Scrapes api /metrics (docker + manual-up targets)
+│   └── grafana/                      # Auto-provisioned datasource + "Rakuten API Overview" dashboard
+│
 ├── airflow_dst/
 │   ├── docker-compose.yaml          # Airflow stack (own network, built image)
-│   ├── Dockerfile                   # apache/airflow:2.10.0 + mlflow client
+│   ├── Dockerfile                   # apache/airflow:2.10.0 + mlflow client + dvc + torch(cpu)
 │   ├── requirements.txt
 │   └── dags/
-│       └── rakuten_model_promotion.py    # Model promotion DAG
+│       ├── rakuten_model_promotion.py    # Model promotion DAG
+│       └── rakuten_model_training.py     # DVC prep + train DAG (triggered by /retrain)
 │
 ├── data/                            # Not in git
 │   ├── raw/                         # Rakuten dataset (CSV + images)
@@ -203,6 +242,8 @@ cd airflow_dst && docker compose up --build
 | API docs | http://localhost:8000/docs |
 | MLflow UI | http://localhost:5001 |
 | Airflow UI | http://localhost:8080 |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 (admin/admin) |
 
 Check all serving-stack services are healthy: `make health`
 
@@ -262,9 +303,9 @@ Known gaps, not yet built:
 
 | Item | What it would add |
 |------|--------------------|
-| Prometheus + Grafana | Serving metrics: request count, latency, error rate, prediction confidence distribution |
 | Drift detection (e.g. Evidently) | Compare live prediction/input distribution against the training set to catch model decay |
-| MLflow ↔ Airflow | Promotion DAG picks the best run from MLflow (Model Registry) instead of a fixed local file path |
+| MLflow ↔ Airflow (promotion) | Promotion DAG picks the best run from MLflow (Model Registry) instead of a fixed local file path — separate from the retrain DAG's `/retrain` trigger, which is already wired |
+| DVC remote | `dvc.yaml` works locally (cache-based reproducibility) but has no configured remote yet — needed to `dvc push`/`pull` data across machines/CI |
 
 ---
 

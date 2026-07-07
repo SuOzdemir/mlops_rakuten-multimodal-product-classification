@@ -6,3 +6,5 @@ sentencepiece>=0.2.0
 protobuf>=4.0.0
 pillow>=10.0.0
 numpy
+requests>=2.32.0
+prometheus-fastapi-instrumentator>=7.0.0

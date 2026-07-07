@@ -16,9 +16,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import models, transforms
 
-import notebooks.image_modeling.models.imageModeling.Model_I12_ConvNeXt_Base_ModerateAug_Full.config as config
-from notebooks.image_modeling.models.imageModeling.Model_I12_ConvNeXt_Base_ModerateAug_Full.dataset import RakutenImageDataset
-from notebooks.image_modeling.models.imageModeling.Model_I12_ConvNeXt_Base_ModerateAug_Full.utils import export_logits_and_features
+import models.Model_I12_ConvNeXt_Base_ModerateAug_Full.config as config
+from models.Model_I12_ConvNeXt_Base_ModerateAug_Full.dataset import RakutenImageDataset
+from models.Model_I12_ConvNeXt_Base_ModerateAug_Full.utils import export_logits_and_features
 
 
 def build_model(num_classes: int) -> nn.Module:

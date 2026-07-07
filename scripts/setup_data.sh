@@ -20,39 +20,18 @@ create_dir() {
     fi
 }
 
-ensure_kaggle_cli() {
-    if ! command -v kaggle &> /dev/null; then
-        echo "🔍 Kaggle CLI not found. Initiating installation..."
-
-        if command -v uv &> /dev/null; then
-            echo "🚀 Installing kaggle via 'uv'..."
-            uv pip install kaggle --system
-        else
-            echo "📦 Installing kaggle via 'pip'..."
-            pip install --upgrade --no-cache-dir kaggle
-        fi
-
-        if ! command -v kaggle &> /dev/null; then
-            echo "❌ Installation failed or PATH not updated. Please install kaggle manually."
-            exit 1
-        fi
-    fi
-}
-
 download_kaggle() {
     local slug="$1"      # Kaggle dataset identifier (user/dataset-name)
     local zip_name="$2"   # Expected filename to check for existence
-
-    # Ensure dependencies are met before proceeding
-    ensure_kaggle_cli
 
     # Check for existing download to avoid redundant bandwidth usage (Idempotency)
     if [[ -f "${DOWNLOAD_FOLDER}/${zip_name}" ]]; then
         echo "⏭️  Already downloaded: $zip_name"
     else
         echo "📥 Downloading dataset: $slug..."
-        # Download command with error handling
-        kaggle datasets download -d "$slug" -p "${DOWNLOAD_FOLDER}" || {
+        # kaggle is a project dependency (pyproject.toml) — `uv run` resolves it
+        # from .venv regardless of PATH, no separate install/PATH dance needed.
+        (cd "$PROJECT_ROOT" && uv run kaggle datasets download -d "$slug" -p "${DOWNLOAD_FOLDER}") || {
             echo "❌ Download failed!";
             exit 1;
         }

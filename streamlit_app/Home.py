@@ -7,12 +7,21 @@ import requests
 import streamlit as st
 from PIL import Image
 
+from project_story import (
+    render_data_training,
+    render_links,
+    render_monitoring,
+    render_orchestration,
+    render_overview,
+    render_tracking,
+)
+
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 st.set_page_config(
     page_title="Rakuten Product Classifier",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 st.markdown(
@@ -33,7 +42,7 @@ st.markdown(
 # API helpers
 # -------------------------------------------------------------------
 
-def api_login(username: str, password: str) -> str | None:
+def api_login(username: str, password: str) -> dict | None:
     try:
         resp = requests.post(
             f"{API_URL}/login",
@@ -41,7 +50,7 @@ def api_login(username: str, password: str) -> str | None:
             timeout=10,
         )
         if resp.status_code == 200:
-            return resp.json()["access_token"]
+            return resp.json()
         return None
     except Exception:
         return None
@@ -91,6 +100,47 @@ def api_predict(token: str, designation: str, description: str, image: Image.Ima
     except Exception as e:
         st.error(f"Prediction failed: {e}")
         return None
+
+
+def api_retrain(token: str, model: str, smoke_test: bool) -> dict | None:
+    try:
+        resp = requests.post(
+            f"{API_URL}/retrain",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"model": model, "smoke_test": smoke_test},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        st.error(f"Retrain failed ({resp.status_code}): {resp.json().get('detail', resp.text)}")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error(f"Cannot reach API at {API_URL}. Is the API server running?")
+        return None
+
+
+def api_retrain_status(token: str, job_id: str) -> dict | None:
+    try:
+        resp = requests.get(
+            f"{API_URL}/retrain/{job_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        return resp.json() if resp.status_code == 200 else None
+    except requests.exceptions.ConnectionError:
+        return None
+
+
+def api_retrain_list(token: str) -> list[dict]:
+    try:
+        resp = requests.get(
+            f"{API_URL}/retrain",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        return resp.json() if resp.status_code == 200 else []
+    except requests.exceptions.ConnectionError:
+        return []
 
 
 # -------------------------------------------------------------------
@@ -206,11 +256,12 @@ def render_login():
 
         if submitted:
             with st.spinner("Signing in..."):
-                token = api_login(username, password)
-            if token:
+                login_result = api_login(username, password)
+            if login_result:
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = username
-                st.session_state["token"] = token
+                st.session_state["token"] = login_result["access_token"]
+                st.session_state["role"] = login_result.get("role", "viewer")
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
@@ -222,13 +273,44 @@ def render_login():
 
 def render_prediction():
     st.sidebar.title("Rakuten Classifier")
-    st.sidebar.markdown(f"Logged in as **{st.session_state.get('username', '')}**")
+    role = st.session_state.get("role", "viewer")
+    st.sidebar.markdown(f"Logged in as **{st.session_state.get('username', '')}** ({role})")
+
+    is_admin = role == "admin"
+    story_pages = [
+        "Overview",
+        "Data & Training",
+        "Tracking & Versioning",
+        "Orchestration & Deployment",
+        "Monitoring",
+        "Plugins & Links",
+    ]
+    pages = story_pages + ["Predict"] + (["Retrain (Admin)"] if is_admin else [])
+    page = st.sidebar.radio("Navigation", pages, label_visibility="collapsed")
+
     if st.sidebar.button("Log out"):
         api_logout(st.session_state.get("token", ""))
         st.session_state["logged_in"] = False
         st.session_state["username"] = ""
         st.session_state["token"] = ""
+        st.session_state["role"] = ""
         st.rerun()
+
+    story_renderers = {
+        "Overview": render_overview,
+        "Data & Training": render_data_training,
+        "Tracking & Versioning": render_tracking,
+        "Orchestration & Deployment": render_orchestration,
+        "Monitoring": render_monitoring,
+        "Plugins & Links": render_links,
+    }
+    if page in story_renderers:
+        story_renderers[page]()
+        return
+
+    if page == "Retrain (Admin)":
+        render_retrain()
+        return
 
     st.title("Product Classification")
     st.caption("Upload a product image and enter text to get a multimodal prediction.")
@@ -335,6 +417,73 @@ def render_prediction():
             st.markdown("### Top 3")
             for item in output["top3"]:
                 st.write(f"**{item['Rank']}. {fmt_label(item)}**  \nConfidence: {item['Confidence']}")
+
+
+# -------------------------------------------------------------------
+# Retrain screen (admin only)
+# -------------------------------------------------------------------
+
+STATUS_COLOR = {
+    "queued": "🟡",
+    "running": "🔵",
+    "completed": "🟢",
+    "failed": "🔴",
+}
+
+
+def render_retrain():
+    st.title("Model Retraining")
+    st.caption("Triggers the Airflow DAG `rakuten_model_training` (DVC prep + train) via its REST API.")
+
+    if "retrain_job_id" not in st.session_state:
+        st.session_state.retrain_job_id = None
+
+    with st.form("retrain_form"):
+        model = st.selectbox("Model", ["image", "text"], format_func=lambda m: {"image": "Image — ConvNeXt-Base (I12)", "text": "Text — CamemBERT (T8)"}[m])
+        smoke_test = st.checkbox(
+            "Smoke test (1 epoch, ~64/16 rows — validate the pipeline in minutes, not hours)",
+            value=True,
+        )
+        submitted = st.form_submit_button("Start Retrain", use_container_width=True)
+
+    if submitted:
+        with st.spinner("Triggering Airflow DAG..."):
+            job = api_retrain(st.session_state["token"], model=model, smoke_test=smoke_test)
+        if job:
+            st.session_state.retrain_job_id = job["job_id"]
+            st.success(f"Job started: `{job['job_id']}`")
+
+    st.divider()
+
+    col_refresh, col_auto = st.columns([1, 3])
+    with col_refresh:
+        refresh_clicked = st.button("Refresh status")
+    with col_auto:
+        auto_refresh = st.checkbox("Auto-refresh every 5s", value=False)
+
+    if st.session_state.retrain_job_id:
+        st.markdown(f"### Current job: `{st.session_state.retrain_job_id}`")
+        job = api_retrain_status(st.session_state["token"], st.session_state.retrain_job_id)
+        if job:
+            emoji = STATUS_COLOR.get(job["status"], "⚪")
+            st.markdown(f"**Status:** {emoji} {job['status']}  |  **Model:** {job['model']}  |  **Started:** {job.get('started_at') or '-'}")
+        else:
+            st.warning("Could not fetch job status (Airflow unreachable or job not found).")
+
+    st.divider()
+    st.markdown("### All retrain jobs")
+    jobs = api_retrain_list(st.session_state["token"])
+    if not jobs:
+        st.info("No retrain jobs yet, or Airflow is unreachable.")
+    else:
+        for job in jobs:
+            emoji = STATUS_COLOR.get(job["status"], "⚪")
+            st.write(f"{emoji} `{job['job_id']}` — model: **{job['model']}** — status: **{job['status']}** — started: {job.get('started_at') or '-'}")
+
+    if auto_refresh:
+        import time
+        time.sleep(5)
+        st.rerun()
 
 
 # -------------------------------------------------------------------

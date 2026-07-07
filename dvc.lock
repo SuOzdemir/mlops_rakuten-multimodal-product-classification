@@ -1,0 +1,27 @@
+schema: '2.0'
+stages:
+  prepare_splits:
+    cmd: python scripts/prepare_splits.py
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: bd81f939722e7a41eeff6e27d8ef21ad.dir
+      size: 6566079979
+      nfiles: 263669
+    - path: scripts/prepare_splits.py
+      hash: md5
+      md5: 00e34b1d7b7a3d17aec7056e835c73de
+      size: 4000
+    outs:
+    - path: outputs/image_modeling/label2id.json
+      hash: md5
+      md5: 2c4ee652148136abed6e670fa20052bb
+      size: 362
+    - path: outputs/image_modeling/train_split.csv
+      hash: md5
+      md5: a4c231acd83c87f72ce3ce2b780421f1
+      size: 51506433
+    - path: outputs/image_modeling/val_split.csv
+      hash: md5
+      md5: e93decc6161c46d8cf7c682df451afee
+      size: 9255052

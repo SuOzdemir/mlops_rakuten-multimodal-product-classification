@@ -18,7 +18,7 @@ Take the best models from Phase 1 (CamemBERT + ConvNeXt-Base late fusion) and bu
 │  └──────────────┘    └───────────────┘    └─────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 
-FastAPI no longer depends on MLflow at request time (see §5) — the arrow
+FastAPI no longer depends on MLflow at request time (see §6) — the arrow
 above is dropped intentionally; MLflow is only used during training.
 
 Training pipeline (separate, runs locally or on GPU machine):
@@ -116,7 +116,76 @@ docker compose up
 
 ---
 
-## 3. Prediction Service — FastAPI
+## 3. Model Retraining — DVC + Airflow DAG + REST API
+
+Unlike promotion (manual, post-training), retraining is triggered from the FastAPI service and runs entirely inside Airflow — the API never runs training itself, it only calls Airflow's REST API and polls status.
+
+### Flow
+
+```
+POST /retrain {model: image|text}     (admin only, src/api/main.py)
+   → src/api/retrain.py: requests.post to Airflow REST API
+        POST http://<airflow>/api/v1/dags/rakuten_model_training/dagRuns
+        body: {"dag_run_id": "retrain_<model>_<uuid>", "conf": {"model": "<model>"}}
+        ↓
+   DAG rakuten_model_training (airflow_dst/dags/rakuten_model_training.py):
+        prepare_data:  dvc repro prepare_splits
+        train_model:   dvc repro train_image | train_text   (stage picked from conf.model)
+
+GET /retrain            -> lists all dag runs for rakuten_model_training
+GET /retrain/{job_id}   -> polls one dag run (job_id == dag_run_id)
+```
+
+### DVC — `dvc.yaml`
+
+```yaml
+stages:
+  prepare_splits:
+    cmd: python scripts/prepare_splits.py
+    deps: [scripts/prepare_splits.py, data/raw]
+    outs: [outputs/image_modeling/train_split.csv, outputs/image_modeling/val_split.csv, outputs/image_modeling/label2id.json]
+
+  train_image:
+    cmd: python -m models.Model_I12_ConvNeXt_Base_ModerateAug_Full.train
+    deps: [outputs/image_modeling/train_split.csv, outputs/image_modeling/val_split.csv, outputs/image_modeling/label2id.json, models/Model_I12_ConvNeXt_Base_ModerateAug_Full/{train.py,config.py,dataset.py,utils.py}]
+    outs: [models/Model_I12_ConvNeXt_Base_ModerateAug_Full/best_model_state_dict.pt]
+
+  train_text:
+    cmd: python -m models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.train
+    deps: [outputs/image_modeling/train_split.csv, outputs/image_modeling/val_split.csv, outputs/image_modeling/label2id.json, models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/{train.py,config.py,dataset.py,utils.py}]
+    outs: [models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/best_model_text.pt]
+```
+
+`scripts/prepare_splits.py` merges `X_train.csv` + `Y_train.csv` (from `scripts/setup_data.sh`), builds `image_path_local` (`image_<imageid>_product_<productid>.jpg`) and `label_id` (encoded `prdtypecode`), and writes a single stratified train/val split — shared by both I12 and T8 so image and text models are evaluated on the same held-out products.
+
+`train_image`/`train_text` depend on the split files (and each model's own source files) and output the trained weight (`.pt`, gitignored — DVC tracks its content hash independently of git, exactly the case DVC is for). `dvc repro <stage>` recomputes dep hashes first: if nothing changed since the last successful run, it skips the stage entirely; if the split data or script changed, it reruns and records the new output hash in `dvc.lock` — that hash is what `dvc diff`/`dvc status`/`dvc push` operate on. Before this, DVC had no visibility into the model weights at all.
+
+No DVC remote is configured yet — `dvc repro`/`dvc status` work locally via the DVC cache; `dvc push`/`pull` (for sharing data/model blobs across machines) is future work.
+
+### Airflow REST API access
+
+`airflow_dst/docker-compose.yaml` sets `AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth` so the stable REST API accepts Basic Auth against the `admin`/`admin` user created by `airflow-init`. The `api` service reaches it via `AIRFLOW_API_URL` (default `http://host.docker.internal:8080` — `airflow_dst` is a separate compose stack, own network, same cross-network pattern already used for `MLFLOW_TRACKING_URI` in the promotion DAG).
+
+### Status mapping
+
+`src/api/retrain.py` maps Airflow's DAG-run `state` to a simpler API-facing `status`:
+
+| Airflow state | API status |
+|---|---|
+| `queued` | `queued` |
+| `running` | `running` |
+| `success` | `completed` |
+| `failed` | `failed` |
+
+A `RuntimeError` (-> HTTP 409) is raised client-side if a run for the same model is already `queued`/`running`, checked via `GET /retrain` before triggering. If Airflow itself is unreachable, `requests` raises a connection error that the API turns into HTTP 503.
+
+### Known limitation
+
+Both `models/*/train.py` need the raw Kaggle dataset in `data/raw/` (`./scripts/setup_data.sh`) to get past `prepare_data`. Without it, `dvc repro` fails there — this is a data-availability gap, not a code bug (see README Known Gaps).
+
+---
+
+## 4. Prediction Service — FastAPI
 
 **Location:** `src/api/main.py`  
 **Port:** 8000  
@@ -189,7 +258,7 @@ Assets loaded at startup:
 
 ---
 
-## 4. Web Interface — Streamlit
+## 5. Web Interface — Streamlit
 
 **Location:** `streamlit_app/Home.py`  
 **Port:** 8501  
@@ -218,7 +287,7 @@ The Streamlit container has no PyTorch or Transformers dependency. All inference
 
 ---
 
-## 5. Containerisation
+## 6. Containerisation
 
 ### docker-compose services
 
@@ -260,7 +329,7 @@ Airflow used to run the stock `apache/airflow:2.10.0` image as-is; it now builds
 
 ---
 
-## 6. End-to-End Pipeline
+## 7. End-to-End Pipeline
 
 ```
 1. TRAIN
@@ -278,7 +347,7 @@ Airflow used to run the stock `apache/airflow:2.10.0` image as-is; it now builds
 4. SERVE
    docker compose up --build      # or: make up (incl. mlflow) / make serve (api+streamlit only)
    API loads weights at startup (lifespan event)
-   API also creates+seeds config/users.db on first startup (see §3)
+   API also creates+seeds config/users.db on first startup (see §4)
 
 5. USE
    http://localhost:8501  →  Login  →  Predict
@@ -288,13 +357,15 @@ CI (`.github/workflows/ci.yml`) runs `pytest` + a Docker build check for `api`/`
 
 ---
 
-## 7. Environment Variables
+## 8. Environment Variables
 
 | Variable | Service | Default | Description |
 |----------|---------|---------|-------------|
 | `MLFLOW_TRACKING_URI` | api | `http://mlflow:5001` | MLflow server URL (set but not yet called at runtime) |
 | `MLFLOW_TRACKING_URI` | airflow DAG | `http://host.docker.internal:5001` | For future MLflow Model Registry lookups from the promotion DAG |
 | `USERS_DB_PATH` | api | `config/users.db` | SQLite user store location |
+| `AIRFLOW_API_URL` | api | `http://host.docker.internal:8080` | Airflow REST API base URL, used by `/retrain` |
+| `AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD` | api | `admin` / `admin` | Basic Auth credentials for the Airflow REST API |
 | `API_URL` | streamlit | `http://localhost:8000` | FastAPI server URL |
 | `RAKUTEN_PROJECT_DIR` | airflow DAG | `/project` | Project root in container |
 | `CAMEMBERT_BASE_DIR` | airflow DAG | `streamlit_app/models/camembert_run4` | Path to local CamemBERT base files |

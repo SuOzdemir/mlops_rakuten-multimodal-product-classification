@@ -14,7 +14,7 @@
 # ============================================================
 
 # config import MUST come before transformers to apply HF fixes
-import notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.config as config  # noqa: E402 (intentional first import)
+import models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.config as config  # noqa: E402 (intentional first import)
 
 import gc
 import json
@@ -32,8 +32,8 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, CamembertForSequenceClassification
 
-from notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.dataset import RakutenTextDataset
-from notebooks.image_modeling.models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.utils import (
+from models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.dataset import RakutenTextDataset
+from models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.utils import (
     export_logits_and_features,
     load_full_checkpoint,
     plot_and_save_history,
@@ -108,6 +108,11 @@ def main() -> None:
     train_df["label_id"] = train_df["prdtypecode"].astype(str).map(str_label2id)
     val_df["label_id"]   = val_df["prdtypecode"].astype(str).map(str_label2id)
 
+    if config.SMOKE_TEST:
+        train_df = train_df.sample(n=min(config.SMOKE_TEST_TRAIN_ROWS, len(train_df)), random_state=config.SEED).reset_index(drop=True)
+        val_df = val_df.sample(n=min(config.SMOKE_TEST_VAL_ROWS, len(val_df)), random_state=config.SEED).reset_index(drop=True)
+        print(f"[SMOKE_TEST] Sampled down to {len(train_df)} train / {len(val_df)} val rows")
+
     num_classes = len(label2id)
     print(f"Classes : {num_classes}")
     print(f"Train   : {len(train_df):,}  |  Val: {len(val_df):,}")
@@ -120,6 +125,7 @@ def main() -> None:
     model = CamembertForSequenceClassification.from_pretrained(
         str(config.LOCAL_MODEL_PATH),
         num_labels=num_classes,
+        ignore_mismatched_sizes=True,  # LOCAL_MODEL_PATH's head is sized for 27 classes; reinit if num_classes differs (e.g. SMOKE_TEST)
     )
     model = model.to(device)
 

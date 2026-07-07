@@ -5,9 +5,18 @@ x-airflow-common: &airflow-common
   image: rakuten-airflow:2.10.0
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    # Shared Postgres lives in the main docker-compose.yaml stack (own network) —
+    # reached via host.docker.internal, same pattern as AIRFLOW_API_URL/MLFLOW_TRACKING_URI
+    # below. Run `make up` (or at least `docker compose up -d postgres`) before this stack.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@host.docker.internal:5432/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Airflow pauses newly-discovered DAGs by default — without this, a fresh
+    # stack silently queues /retrain runs forever since the scheduler skips
+    # paused DAGs (queued state never advances, and blocks new retrain calls
+    # via the duplicate-running-job check in src/api/retrain.py).
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth  # lets /retrain call the REST API
     RAKUTEN_PROJECT_DIR: ${RAKUTEN_PROJECT_DIR:-/project}
     CAMEMBERT_BASE_DIR: ${CAMEMBERT_BASE_DIR:-/project/data/camembert_base}
     MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5001}
@@ -18,34 +27,16 @@ x-airflow-common: &airflow-common
     - ../:/project:rw    # full project mounted so DAGs can read models/ and write data/
   env_file:
     - .env
-  depends_on:
-    postgres:
-      condition: service_healthy
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
 
 services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 10s
-      retries: 5
-
   airflow-init:
     <<: *airflow-common
     command: >
-      bash -c "
-        airflow db migrate &&
-        airflow users create
-          --username admin --password admin
-          --firstname Admin --lastname Admin
-          --role Admin --email admin@example.com
-      "
+      bash -c "airflow db migrate &&
+      airflow users create --username admin --password admin
+      --firstname Admin --lastname Admin --role Admin --email admin@example.com"
     restart: "no"
 
   airflow-webserver:
@@ -64,6 +55,3 @@ services:
     <<: *airflow-common
     command: scheduler
     restart: unless-stopped
-
-volumes:
-  postgres_data:

@@ -29,8 +29,8 @@ private/
 *.pth
 *.ckpt
 
-# ── Large output files ──────────────────────────────────────
-outputs/**/*.npy       # Feature exports (kann GB groß sein)
+# ── Large output files (feature exports can be GB-sized) ────
+outputs/**/*.npy
 outputs/**/*.pt
 outputs/**/*.pth
 
@@ -54,6 +54,9 @@ outputs/Fusion_Intermediate_Optimized/
 mlruns/
 artifacts/
 
+# ── Airflow runtime logs ─────────────────────────────────────
+airflow_dst/logs/
+
 # ── Credentials (never commit) ──────────────────────────────
 config/users.db
 
@@ -62,3 +65,4 @@ project_tree.txt
 pyproject.toml.backup
 migrate_files.ps1
 migrate_files.py
+

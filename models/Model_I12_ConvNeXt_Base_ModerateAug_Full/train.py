@@ -18,6 +18,8 @@ import random
 import time
 from pathlib import Path
 
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")  # mlflow/protobuf>=7.34.0 fix
+
 import mlflow
 import numpy as np
 import pandas as pd
@@ -28,9 +30,9 @@ from torch.utils.data import DataLoader
 from torchvision import models, transforms
 from torchvision.models import ConvNeXt_Base_Weights
 
-import notebooks.image_modeling.models.imageModeling.Model_I12_ConvNeXt_Base_ModerateAug_Full.config as config
-from notebooks.image_modeling.models.imageModeling.Model_I12_ConvNeXt_Base_ModerateAug_Full.dataset import RakutenImageDataset
-from notebooks.image_modeling.models.imageModeling.Model_I12_ConvNeXt_Base_ModerateAug_Full.utils import (
+import models.Model_I12_ConvNeXt_Base_ModerateAug_Full.config as config
+from models.Model_I12_ConvNeXt_Base_ModerateAug_Full.dataset import RakutenImageDataset
+from models.Model_I12_ConvNeXt_Base_ModerateAug_Full.utils import (
     export_logits_and_features,
     load_full_checkpoint,
     plot_and_save_history,
@@ -120,6 +122,11 @@ def main() -> None:
     str_label2id = {str(k): v for k, v in label2id.items()}
     train_df["label_id"] = train_df["prdtypecode"].astype(str).map(str_label2id)
     val_df["label_id"]   = val_df["prdtypecode"].astype(str).map(str_label2id)
+
+    if config.SMOKE_TEST:
+        train_df = train_df.sample(n=min(config.SMOKE_TEST_TRAIN_ROWS, len(train_df)), random_state=config.SEED).reset_index(drop=True)
+        val_df = val_df.sample(n=min(config.SMOKE_TEST_VAL_ROWS, len(val_df)), random_state=config.SEED).reset_index(drop=True)
+        print(f"[SMOKE_TEST] Sampled down to {len(train_df)} train / {len(val_df)} val rows")
 
     def make_path(row) -> str:
         return str(config.LOCAL_IMAGE_TRAIN_DIR / f"image_{row['imageid']}_product_{row['productid']}.jpg")

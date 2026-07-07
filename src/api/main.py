@@ -7,10 +7,14 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
+from prometheus_client import Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
+from requests.exceptions import RequestException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.api.db import get_user, init_db, verify_password
+from src.api.retrain import ModelName, get_status, list_jobs, start_retrain
 from streamlit_app.services.raw_late_fusion_predictor import load_assets, predict
 
 _tokens: dict[str, dict[str, str]] = {}  # token → {"username":..., "role":...}
@@ -29,6 +33,13 @@ def _require_auth(request: Request) -> dict[str, str]:
     if token not in _tokens:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
     return _tokens[token]
+
+
+def _require_admin(request: Request) -> dict[str, str]:
+    user = _require_auth(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required.")
+    return user
 
 
 # -------------------------------------------------------------------
@@ -54,6 +65,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+Instrumentator().instrument(app).expose(app)
+
+PREDICTION_CONFIDENCE = Histogram(
+    "prediction_confidence",
+    "Top-1 predicted class confidence (0-1)",
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
 
 # -------------------------------------------------------------------
 # Endpoints
@@ -71,7 +90,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     token = secrets.token_hex(32)
     _tokens[token] = {"username": user["username"], "role": user["role"]}
-    return {"access_token": token, "token_type": "bearer"}
+    return {"access_token": token, "token_type": "bearer", "role": user["role"]}
 
 
 @app.post("/logout")
@@ -115,4 +134,42 @@ async def predict_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    PREDICTION_CONFIDENCE.observe(result["top3"][0]["confidence_float"] / 100.0)
+
     return JSONResponse(content=result)
+
+
+# -------------------------------------------------------------------
+# Retrain — admin only
+# -------------------------------------------------------------------
+@app.post("/retrain")
+def retrain_endpoint(request: Request, model: ModelName = Form(...), smoke_test: bool = Form(False)):
+    _require_admin(request)
+    try:
+        job = start_retrain(model, smoke_test=smoke_test)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RequestException as exc:
+        raise HTTPException(status_code=503, detail=f"Airflow unreachable: {exc}")
+    return job
+
+
+@app.get("/retrain")
+def retrain_list_endpoint(request: Request):
+    _require_auth(request)
+    try:
+        return list_jobs()
+    except RequestException as exc:
+        raise HTTPException(status_code=503, detail=f"Airflow unreachable: {exc}")
+
+
+@app.get("/retrain/{job_id}")
+def retrain_status_endpoint(request: Request, job_id: str):
+    _require_auth(request)
+    try:
+        job = get_status(job_id)
+    except RequestException as exc:
+        raise HTTPException(status_code=503, detail=f"Airflow unreachable: {exc}")
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job id.")
+    return job

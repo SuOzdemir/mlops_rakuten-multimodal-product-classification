@@ -1,0 +1,36 @@
+stages:
+  prepare_splits:
+    cmd: python scripts/prepare_splits.py
+    deps:
+      - scripts/prepare_splits.py
+      - data/raw
+    outs:
+      - outputs/image_modeling/train_split.csv
+      - outputs/image_modeling/val_split.csv
+      - outputs/image_modeling/label2id.json
+
+  train_image:
+    cmd: python -m models.Model_I12_ConvNeXt_Base_ModerateAug_Full.train
+    deps:
+      - outputs/image_modeling/train_split.csv
+      - outputs/image_modeling/val_split.csv
+      - outputs/image_modeling/label2id.json
+      - models/Model_I12_ConvNeXt_Base_ModerateAug_Full/train.py
+      - models/Model_I12_ConvNeXt_Base_ModerateAug_Full/config.py
+      - models/Model_I12_ConvNeXt_Base_ModerateAug_Full/dataset.py
+      - models/Model_I12_ConvNeXt_Base_ModerateAug_Full/utils.py
+    outs:
+      - models/Model_I12_ConvNeXt_Base_ModerateAug_Full/best_model_state_dict.pt
+
+  train_text:
+    cmd: python -m models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.train
+    deps:
+      - outputs/image_modeling/train_split.csv
+      - outputs/image_modeling/val_split.csv
+      - outputs/image_modeling/label2id.json
+      - models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/train.py
+      - models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/config.py
+      - models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/dataset.py
+      - models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/utils.py
+    outs:
+      - models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/best_model_text.pt

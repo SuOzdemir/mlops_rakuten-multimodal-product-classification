@@ -30,6 +30,9 @@ os.environ["HF_HUB_DISABLE_XET_BACKEND"]      = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"]  = "1"
 sys.modules["hf_xet"] = None   # Prevent hf_xet import attempt
 
+# mlflow/protobuf>=7.34.0 incompatibility fix — must be set before mlflow import
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+
 # ------------------------------------------------------------
 # Experiment identity
 # ------------------------------------------------------------
@@ -45,6 +48,15 @@ NUM_WORKERS = 4
 
 MAX_EPOCHS             = 10
 EARLY_STOPPING_PATIENCE = 3   # Text models converge faster than image models
+
+# SMOKE_TEST=1 -> tiny run (1 epoch, small data sample) to validate the
+# retrain pipeline (Airflow/DVC/mlflow plumbing) without a multi-hour wait.
+SMOKE_TEST = os.environ.get("SMOKE_TEST", "0") == "1"
+SMOKE_TEST_TRAIN_ROWS = 64
+SMOKE_TEST_VAL_ROWS = 16
+if SMOKE_TEST:
+    MAX_EPOCHS = 1
+    EARLY_STOPPING_PATIENCE = 1
 
 LEARNING_RATE = 2e-5
 WEIGHT_DECAY  = 0.01
@@ -72,12 +84,19 @@ RESUME_TRAINING   = False
 CHECKPOINT_SOURCE = "local_last"   # "local_last" | "local_best"
 
 # ------------------------------------------------------------
-# Project directory structure  –  adjust paths to your machine
+# Project directory structure — override with RAKUTEN_PROJECT_DIR /
+# CAMEMBERT_BASE_DIR if running against a different data location
+# (same env vars used by airflow_dst/dags/rakuten_model_promotion.py).
 # ------------------------------------------------------------
 PROJECT_DIR       = Path(
-    r"C:\Users\felix\Documents\DS_MLE_MasterSystem\06_PROJECTS\Project_01_Rakuten_Multimodal"
+    os.environ.get("RAKUTEN_PROJECT_DIR", str(Path(__file__).resolve().parent.parent.parent.parent))
 )
-LOCAL_MODEL_PATH  = Path(r"C:\Users\felix\Camembert_lokal")  # Local HF model download
+LOCAL_MODEL_PATH  = Path(
+    os.environ.get(
+        "CAMEMBERT_BASE_DIR",
+        str(PROJECT_DIR / "data" / "rakuten_streamlit_predictor" / "text_model" / "camembert_run4"),
+    )
+)
 
 OUTPUT_DIR  = PROJECT_DIR / "outputs"
 FIGURE_DIR  = PROJECT_DIR / "figures"
@@ -86,7 +105,10 @@ SPLIT_DIR   = OUTPUT_DIR  / "image_modeling"
 
 # Run-specific output folders (auto-created by train.py)
 LOCAL_OUTPUT_ROOT = OUTPUT_DIR / RUN_NAME
-LOCAL_MODEL_ROOT  = MODEL_DIR  / RUN_NAME
+# Checkpoints are colocated with this file (models/textModeling/Model_T8_.../),
+# not MODEL_DIR/RUN_NAME — that name doesn't match this directory's real name
+# and would silently write checkpoints where dvc.yaml/promotion DAG don't look.
+LOCAL_MODEL_ROOT  = Path(__file__).resolve().parent
 LOCAL_FIG_ROOT    = FIGURE_DIR / RUN_NAME
 
 # Checkpoint & output file paths (derived, do not change)

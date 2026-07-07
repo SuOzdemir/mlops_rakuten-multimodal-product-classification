@@ -15,6 +15,7 @@
 # and pass the new config to train.py.
 # ============================================================
 
+import os
 from pathlib import Path
 
 # ------------------------------------------------------------
@@ -32,6 +33,15 @@ NUM_WORKERS = 4
 
 MAX_EPOCHS = 20
 EARLY_STOPPING_PATIENCE = 6
+
+# SMOKE_TEST=1 -> tiny run (1 epoch, small data sample) to validate the
+# retrain pipeline (Airflow/DVC/mlflow plumbing) without a multi-hour wait.
+SMOKE_TEST = os.environ.get("SMOKE_TEST", "0") == "1"
+SMOKE_TEST_TRAIN_ROWS = 64
+SMOKE_TEST_VAL_ROWS = 16
+if SMOKE_TEST:
+    MAX_EPOCHS = 1
+    EARLY_STOPPING_PATIENCE = 1
 
 # Differential LRs: very conservative to protect large pretrained backbone
 LR_BACKBONE  = 5e-6
@@ -67,10 +77,11 @@ RESUME_TRAINING   = False
 CHECKPOINT_SOURCE = "local_last"   # "local_last" | "local_best"
 
 # ------------------------------------------------------------
-# Project directory structure  –  adjust PROJECT_DIR to your machine
+# Project directory structure — override with RAKUTEN_PROJECT_DIR if
+# running against a different data location.
 # ------------------------------------------------------------
 PROJECT_DIR = Path(
-    r"C:\Users\felix\Documents\DS_MLE_MasterSystem\06_PROJECTS\Project_01_Rakuten_Multimodal"
+    os.environ.get("RAKUTEN_PROJECT_DIR", str(Path(__file__).resolve().parent.parent.parent))
 )
 
 DATA_DIR        = PROJECT_DIR / "data"
@@ -86,7 +97,10 @@ LOCAL_IMAGE_TEST_DIR  = RAW_IMG_DIR / "image_test"
 
 # Run-specific output folders (auto-created by train.py)
 LOCAL_OUTPUT_ROOT = OUTPUT_DIR / RUN_NAME
-LOCAL_MODEL_ROOT  = MODEL_DIR  / RUN_NAME
+# Checkpoints are colocated with this file (models/Model_I12_.../), not
+# MODEL_DIR/RUN_NAME — that name doesn't match this directory's real name
+# and would silently write checkpoints where dvc.yaml/promotion DAG don't look.
+LOCAL_MODEL_ROOT  = Path(__file__).resolve().parent
 LOCAL_FIG_ROOT    = FIGURE_DIR / RUN_NAME
 
 # Checkpoint & output file paths (derived, do not change)

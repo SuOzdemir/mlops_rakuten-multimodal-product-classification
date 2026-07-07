@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 # Make project root importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -112,6 +113,19 @@ def auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.fixture()
+def viewer_token(client):
+    """A valid Bearer token for the non-admin demo user."""
+    resp = client.post("/login", data={"username": "user", "password": "pass"})
+    assert resp.status_code == 200
+    return resp.json()["access_token"]
+
+
+@pytest.fixture()
+def viewer_auth_headers(viewer_token):
+    return {"Authorization": f"Bearer {viewer_token}"}
+
+
 # ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
@@ -134,6 +148,7 @@ def test_login_success(client):
     body = resp.json()
     assert "access_token" in body
     assert body["token_type"] == "bearer"
+    assert body["role"] == "admin"
     assert len(body["access_token"]) == 64  # secrets.token_hex(32) → 64 hex chars
 
 
@@ -339,3 +354,82 @@ def test_predict_custom_image_weight(client, auth_headers):
     mock_predict.assert_called_once()
     _, kwargs = mock_predict.call_args
     assert kwargs["image_weight"] == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# /retrain — admin only
+# ---------------------------------------------------------------------------
+
+FAKE_JOB = {
+    "job_id": "retrain_text_abc123",
+    "model": "text",
+    "status": "running",
+    "started_at": "2026-01-01T00:00:00+00:00",
+}
+
+
+def test_retrain_requires_auth(client):
+    resp = client.post("/retrain", data={"model": "text"})
+    assert resp.status_code == 401
+
+
+def test_retrain_viewer_forbidden(client, viewer_auth_headers):
+    resp = client.post("/retrain", headers=viewer_auth_headers, data={"model": "text"})
+    assert resp.status_code == 403
+
+
+def test_retrain_admin_starts_job(client, auth_headers):
+    with patch("src.api.main.start_retrain", return_value=FAKE_JOB) as mock_start:
+        resp = client.post("/retrain", headers=auth_headers, data={"model": "text"})
+    assert resp.status_code == 200
+    assert resp.json() == FAKE_JOB
+    mock_start.assert_called_once_with("text", smoke_test=False)
+
+
+def test_retrain_unknown_model_raises_422(client, auth_headers):
+    """model is a real enum now — FastAPI rejects unknown values before start_retrain runs."""
+    resp = client.post("/retrain", headers=auth_headers, data={"model": "bogus"})
+    assert resp.status_code == 422
+
+
+def test_retrain_duplicate_job_raises_409(client, auth_headers):
+    with patch("src.api.main.start_retrain", side_effect=RuntimeError("already running")):
+        resp = client.post("/retrain", headers=auth_headers, data={"model": "text"})
+    assert resp.status_code == 409
+
+
+def test_retrain_list_requires_auth(client):
+    resp = client.get("/retrain")
+    assert resp.status_code == 401
+
+
+def test_retrain_list_available_to_viewer(client, viewer_auth_headers):
+    with patch("src.api.main.list_jobs", return_value=[FAKE_JOB]):
+        resp = client.get("/retrain", headers=viewer_auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == [FAKE_JOB]
+
+
+def test_retrain_status_unknown_job_returns_404(client, auth_headers):
+    with patch("src.api.main.get_status", return_value=None):
+        resp = client.get("/retrain/does-not-exist", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+def test_retrain_status_known_job(client, auth_headers):
+    with patch("src.api.main.get_status", return_value=FAKE_JOB):
+        resp = client.get(f"/retrain/{FAKE_JOB['job_id']}", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == FAKE_JOB
+
+
+def test_retrain_airflow_unreachable_returns_503(client, auth_headers):
+    with patch("src.api.main.start_retrain", side_effect=RequestsConnectionError("no route")):
+        resp = client.post("/retrain", headers=auth_headers, data={"model": "text"})
+    assert resp.status_code == 503
+
+
+def test_retrain_list_airflow_unreachable_returns_503(client, auth_headers):
+    with patch("src.api.main.list_jobs", side_effect=RequestsConnectionError("no route")):
+        resp = client.get("/retrain", headers=auth_headers)
+    assert resp.status_code == 503

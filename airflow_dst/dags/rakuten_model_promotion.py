@@ -45,8 +45,8 @@ CAMEMBERT_BASE_DIR = Path(
 )
 
 # Source paths (training outputs)
-IMAGE_WEIGHTS_SRC = PROJECT_DIR / "models" / "I12_ConvNeXt_Base_ModerateAug_Full" / "best_model_state_dict.pt"
-TEXT_WEIGHTS_SRC  = PROJECT_DIR / "models" / "T8_CamemBERT_FullFineTune_L128"      / "best_model_text.pt"
+IMAGE_WEIGHTS_SRC = PROJECT_DIR / "models" / "Model_I12_ConvNeXt_Base_ModerateAug_Full" / "best_model_state_dict.pt"
+TEXT_WEIGHTS_SRC  = PROJECT_DIR / "models" / "textModeling" / "Model_T8_CamemBERT_FullFineTune_L128" / "best_model_text.pt"
 LABEL2ID_SRC      = PROJECT_DIR / "outputs" / "image_modeling" / "label2id.json"
 CATEGORY_MAP_SRC  = PROJECT_DIR / "streamlit_app" / "config" / "prdtypecode_mapping.json"
 
