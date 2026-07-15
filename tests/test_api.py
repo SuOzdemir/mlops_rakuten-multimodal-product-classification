@@ -383,7 +383,7 @@ def test_retrain_admin_starts_job(client, auth_headers):
         resp = client.post("/retrain", headers=auth_headers, data={"model": "text"})
     assert resp.status_code == 200
     assert resp.json() == FAKE_JOB
-    mock_start.assert_called_once_with("text", smoke_test=False)
+    mock_start.assert_called_once_with("text")
 
 
 def test_retrain_unknown_model_raises_422(client, auth_headers):

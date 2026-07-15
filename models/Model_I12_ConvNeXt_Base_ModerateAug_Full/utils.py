@@ -7,6 +7,7 @@
 
 import json
 import random
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -145,7 +146,15 @@ def run_epoch(model, loader, criterion, device, optimizer=None, scaler=None) -> 
     all_preds: list = []
     all_true:  list = []
 
-    for batch in loader:
+    # Prints ~10 times per epoch regardless of dataset size -- with no
+    # per-batch output at all, a slow-but-alive run (e.g. throttled CPU,
+    # host under load) and a genuinely hung one look identical from the
+    # logs until the whole epoch finishes.
+    n_batches = len(loader)
+    log_every = max(1, n_batches // 10)
+    epoch_t0 = time.time()
+
+    for batch_idx, batch in enumerate(loader, start=1):
         # Support both (img, label) and (img, label, idx)
         images, labels = batch[0], batch[1]
         images = images.to(device, non_blocking=True)
@@ -176,6 +185,11 @@ def run_epoch(model, loader, criterion, device, optimizer=None, scaler=None) -> 
         preds = torch.argmax(logits, dim=1)
         all_preds.extend(preds.detach().cpu().numpy())
         all_true.extend(labels.detach().cpu().numpy())
+
+        if batch_idx % log_every == 0 or batch_idx == n_batches:
+            elapsed = time.time() - epoch_t0
+            print(f"  [{'train' if is_train else 'val'}] batch {batch_idx}/{n_batches} "
+                  f"({elapsed:.0f}s elapsed, {elapsed / batch_idx:.1f}s/batch)")
 
     epoch_loss        = total_loss / len(loader.dataset)
     epoch_acc         = accuracy_score(all_true, all_preds)

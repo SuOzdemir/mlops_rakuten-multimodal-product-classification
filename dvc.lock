@@ -25,3 +25,78 @@ stages:
       hash: md5
       md5: e93decc6161c46d8cf7c682df451afee
       size: 9255052
+  train_image:
+    cmd: python -m models.Model_I12_ConvNeXt_Base_ModerateAug_Full.train
+    deps:
+    - path: models/Model_I12_ConvNeXt_Base_ModerateAug_Full/config.py
+      hash: md5
+      md5: 3f4349be7d345d6ba888e9528cff8726
+      size: 4551
+    - path: models/Model_I12_ConvNeXt_Base_ModerateAug_Full/dataset.py
+      hash: md5
+      md5: 646f673c63d27cc61a1a037ca4c2c737
+      size: 1920
+    - path: models/Model_I12_ConvNeXt_Base_ModerateAug_Full/train.py
+      hash: md5
+      md5: b259f28eeb0bcecf6dbf50c4a595a56c
+      size: 15882
+    - path: models/Model_I12_ConvNeXt_Base_ModerateAug_Full/utils.py
+      hash: md5
+      md5: c953db135420c81e0520a855e0afbbae
+      size: 13810
+    - path: outputs/image_modeling/label2id.json
+      hash: md5
+      md5: 2c4ee652148136abed6e670fa20052bb
+      size: 362
+    - path: outputs/image_modeling/train_split.csv
+      hash: md5
+      md5: a4c231acd83c87f72ce3ce2b780421f1
+      size: 51506433
+    - path: outputs/image_modeling/val_split.csv
+      hash: md5
+      md5: e93decc6161c46d8cf7c682df451afee
+      size: 9255052
+    outs:
+    - path: 
+        models/Model_I12_ConvNeXt_Base_ModerateAug_Full/best_model_state_dict.pt
+      hash: md5
+      md5: 0a1c39d505bae47898db9c598027e2b6
+      size: 350512075
+  train_text:
+    cmd: python -m 
+      models.textModeling.Model_T8_CamemBERT_FullFineTune_L128.train
+    deps:
+    - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/config.py
+      hash: md5
+      md5: 358dc391afe47c79de5653929d64c00d
+      size: 5049
+    - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/dataset.py
+      hash: md5
+      md5: 482f385cbeadbcb72ee2981b146d75ee
+      size: 1994
+    - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/train.py
+      hash: md5
+      md5: b14202ee4c221ead4d2bf2a11bbf594a
+      size: 14407
+    - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/utils.py
+      hash: md5
+      md5: a6880dce8a3d2f0f7e2709ecf33e7987
+      size: 15012
+    - path: outputs/image_modeling/label2id.json
+      hash: md5
+      md5: 2c4ee652148136abed6e670fa20052bb
+      size: 362
+    - path: outputs/image_modeling/train_split.csv
+      hash: md5
+      md5: a4c231acd83c87f72ce3ce2b780421f1
+      size: 51506433
+    - path: outputs/image_modeling/val_split.csv
+      hash: md5
+      md5: e93decc6161c46d8cf7c682df451afee
+      size: 9255052
+    outs:
+    - path: 
+        models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/best_model_text.pt
+      hash: md5
+      md5: 31f04f0af3a9d4b182ce0c2cc0815223
+      size: 442652965

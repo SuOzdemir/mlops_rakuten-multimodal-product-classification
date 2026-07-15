@@ -58,7 +58,7 @@ artifacts/
 airflow_dst/logs/
 
 # ── Credentials (never commit) ──────────────────────────────
-config/users.db
+.env
 
 # ── Projektdateien ──────────────────────────────────────────
 project_tree.txt

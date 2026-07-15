@@ -1,7 +1,14 @@
-mlflow>=2.16.0
-dvc>=3.55.0
-pandas>=2.2.0
-scikit-learn>=1.8.0
-transformers>=5.5.4
-sentencepiece>=0.2.1
-protobuf>=7.34.0
+# Training moved to the ephemeral trainer container (see trainer/requirements.txt
+# for its deps) -- airflow only needs prepare_splits.py's deps (pandas,
+# scikit-learn) plus dvc for `dvc repro prepare_splits`, and the Docker
+# provider so DockerOperator can launch the trainer via docker-socket-proxy.
+#
+# No version floors here -- installed together with --constraint (see
+# Dockerfile), which pins every package (including transitive ones) to
+# versions known to work with this apache-airflow==2.10.0. A floor like
+# pandas>=2.2.0 conflicts with the constraint file's pandas==2.1.4 and
+# breaks the build; let the constraints file pick the version.
+dvc
+pandas
+scikit-learn
+apache-airflow-providers-docker

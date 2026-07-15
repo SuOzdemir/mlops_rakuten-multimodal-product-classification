@@ -123,10 +123,15 @@ def main() -> None:
     train_df["label_id"] = train_df["prdtypecode"].astype(str).map(str_label2id)
     val_df["label_id"]   = val_df["prdtypecode"].astype(str).map(str_label2id)
 
-    if config.SMOKE_TEST:
-        train_df = train_df.sample(n=min(config.SMOKE_TEST_TRAIN_ROWS, len(train_df)), random_state=config.SEED).reset_index(drop=True)
-        val_df = val_df.sample(n=min(config.SMOKE_TEST_VAL_ROWS, len(val_df)), random_state=config.SEED).reset_index(drop=True)
-        print(f"[SMOKE_TEST] Sampled down to {len(train_df)} train / {len(val_df)} val rows")
+    if config.TRAIN_ROWS_OVERRIDE or config.VAL_ROWS_OVERRIDE:
+        # No random_state here on purpose: this sample is meant to change
+        # every run (a quick/bounded sanity check), unlike the rest of
+        # training which stays seeded for reproducibility.
+        if config.TRAIN_ROWS_OVERRIDE:
+            train_df = train_df.sample(n=min(config.TRAIN_ROWS_OVERRIDE, len(train_df))).reset_index(drop=True)
+        if config.VAL_ROWS_OVERRIDE:
+            val_df = val_df.sample(n=min(config.VAL_ROWS_OVERRIDE, len(val_df))).reset_index(drop=True)
+        print(f"[TRAIN_ROWS_OVERRIDE] Sampled down to {len(train_df)} train / {len(val_df)} val rows (random each run)")
 
     def make_path(row) -> str:
         return str(config.LOCAL_IMAGE_TRAIN_DIR / f"image_{row['imageid']}_product_{row['productid']}.jpg")
@@ -241,6 +246,9 @@ def main() -> None:
     for epoch in range(start_epoch, config.MAX_EPOCHS + 1):
         gc.collect()
         torch.cuda.empty_cache()
+
+        print(f"\n--- Epoch {epoch}/{config.MAX_EPOCHS} starting "
+              f"({time.time() - start_time:.0f}s since training start) ---")
 
         train_loss, train_acc, train_macro_f1, train_weighted_f1 = run_epoch(
             model, train_loader, criterion, device, optimizer, scaler

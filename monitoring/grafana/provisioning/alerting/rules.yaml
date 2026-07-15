@@ -1,0 +1,40 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: drift-alerts
+    folder: Rakuten Alerts
+    interval: 1m
+    rules:
+      - uid: prediction-drift-psi-alert
+        title: "Prediction drift (PSI) significant"
+        condition: C
+        # for: 2m -- PSI must stay above threshold for 2 consecutive
+        # evaluations before firing, so a single noisy window doesn't alert.
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: prediction_drift_psi
+              instant: true
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.25]
+        annotations:
+          summary: "PSI is {{ $values.A }} (threshold 0.25) -- live prediction distribution has significantly diverged from the training set."
+        labels:
+          severity: warning

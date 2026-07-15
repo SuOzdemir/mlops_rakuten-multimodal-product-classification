@@ -1,6 +1,7 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.9
+psycopg2-binary>=2.9.9
 transformers>=5.0.0
 sentencepiece>=0.2.0
 protobuf>=4.0.0

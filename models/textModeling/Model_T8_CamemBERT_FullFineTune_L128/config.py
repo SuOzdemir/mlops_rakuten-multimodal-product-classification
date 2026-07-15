@@ -49,14 +49,16 @@ NUM_WORKERS = 4
 MAX_EPOCHS             = 10
 EARLY_STOPPING_PATIENCE = 3   # Text models converge faster than image models
 
-# SMOKE_TEST=1 -> tiny run (1 epoch, small data sample) to validate the
-# retrain pipeline (Airflow/DVC/mlflow plumbing) without a multi-hour wait.
-SMOKE_TEST = os.environ.get("SMOKE_TEST", "0") == "1"
-SMOKE_TEST_TRAIN_ROWS = 64
-SMOKE_TEST_VAL_ROWS = 16
-if SMOKE_TEST:
-    MAX_EPOCHS = 1
-    EARLY_STOPPING_PATIENCE = 1
+# MAX_EPOCHS_OVERRIDE bounds epoch count for a real (non-subsampled-model)
+# sanity run without waiting hours -- e.g. a real single-epoch check.
+if os.environ.get("MAX_EPOCHS_OVERRIDE"):
+    MAX_EPOCHS = int(os.environ["MAX_EPOCHS_OVERRIDE"])
+
+# TRAIN_ROWS_OVERRIDE / VAL_ROWS_OVERRIDE: subsample to a chosen size for a
+# real (full-size model, real architecture) run that still finishes in
+# bounded time instead of the full dataset.
+TRAIN_ROWS_OVERRIDE = int(os.environ["TRAIN_ROWS_OVERRIDE"]) if os.environ.get("TRAIN_ROWS_OVERRIDE") else None
+VAL_ROWS_OVERRIDE = int(os.environ["VAL_ROWS_OVERRIDE"]) if os.environ.get("VAL_ROWS_OVERRIDE") else None
 
 LEARNING_RATE = 2e-5
 WEIGHT_DECAY  = 0.01

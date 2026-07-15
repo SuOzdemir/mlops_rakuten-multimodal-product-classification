@@ -7,12 +7,13 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
-from prometheus_client import Histogram
+from prometheus_client import Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 from requests.exceptions import RequestException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from src.api import drift
 from src.api.db import get_user, init_db, verify_password
 from src.api.retrain import ModelName, get_status, list_jobs, start_retrain
 from streamlit_app.services.raw_late_fusion_predictor import load_assets, predict
@@ -71,6 +72,17 @@ PREDICTION_CONFIDENCE = Histogram(
     "prediction_confidence",
     "Top-1 predicted class confidence (0-1)",
     buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
+PREDICTION_DRIFT_PSI = Gauge(
+    "prediction_drift_psi",
+    "Population Stability Index of the live top-1 class distribution "
+    "(last 200 predictions) vs. the training set's class distribution. "
+    "<0.1 no significant drift, 0.1-0.25 moderate, >0.25 significant.",
+)
+PREDICTION_DRIFT_WINDOW_SIZE = Gauge(
+    "prediction_drift_window_size",
+    "Number of predictions currently in the drift rolling window (max 200).",
 )
 
 
@@ -136,6 +148,13 @@ async def predict_endpoint(
 
     PREDICTION_CONFIDENCE.observe(result["top3"][0]["confidence_float"] / 100.0)
 
+    drift.record_prediction(result["top3"][0]["prdtypecode"])
+    PREDICTION_DRIFT_WINDOW_SIZE.set(drift.window_size())
+    psi = drift.current_psi()
+    # NaN (not 0.0) while the window is still warming up -- 0.0 would read as
+    # "no drift", but really means "not enough predictions yet to say."
+    PREDICTION_DRIFT_PSI.set(psi if psi is not None else float("nan"))
+
     return JSONResponse(content=result)
 
 
@@ -143,10 +162,10 @@ async def predict_endpoint(
 # Retrain — admin only
 # -------------------------------------------------------------------
 @app.post("/retrain")
-def retrain_endpoint(request: Request, model: ModelName = Form(...), smoke_test: bool = Form(False)):
+def retrain_endpoint(request: Request, model: ModelName = Form(...)):
     _require_admin(request)
     try:
-        job = start_retrain(model, smoke_test=smoke_test)
+        job = start_retrain(model)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except RequestException as exc:

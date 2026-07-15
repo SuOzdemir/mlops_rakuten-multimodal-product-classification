@@ -25,16 +25,24 @@ class ModelName(str, Enum):
     text = "text"
 
 
-def start_retrain(model: ModelName, smoke_test: bool = False) -> dict:
+def start_retrain(model: ModelName) -> dict:
+    # Blocks on ANY in-flight retrain, not just the same model: every retrain
+    # runs `dvc repro` against the same shared project checkout, and DVC's
+    # lock (.dvc/tmp/rwlock) is repo-wide, not per-stage. Two different
+    # models retraining at once don't get parallelism -- they collide on
+    # that lock and one (sometimes both) fails.
     for job in list_jobs():
-        if job["model"] == model.value and job["status"] in ("queued", "running"):
-            raise RuntimeError(f"A retrain job for '{model.value}' is already running.")
+        if job["status"] in ("queued", "running"):
+            raise RuntimeError(
+                f"A retrain job for '{job['model']}' is already running. "
+                "Only one retrain (any model) can run at a time -- they share DVC's lock."
+            )
 
     dag_run_id = f"retrain_{model.value}_{uuid.uuid4().hex[:8]}"
     resp = requests.post(
         f"{AIRFLOW_API_URL}/api/v1/dags/{DAG_ID}/dagRuns",
         auth=_AUTH,
-        json={"dag_run_id": dag_run_id, "conf": {"model": model.value, "smoke_test": smoke_test}},
+        json={"dag_run_id": dag_run_id, "conf": {"model": model.value}},
         timeout=_TIMEOUT,
     )
     resp.raise_for_status()

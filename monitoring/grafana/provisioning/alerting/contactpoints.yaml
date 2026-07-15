@@ -1,0 +1,18 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: slack-drift-alerts
+    receivers:
+      - uid: slack-drift-receiver
+        type: slack
+        settings:
+          # Set via the SLACK_WEBHOOK_URL env var (grafana service in
+          # docker-compose.yaml, sourced from a local, gitignored .env) --
+          # never hardcode a webhook URL here.
+          url: ${SLACK_WEBHOOK_URL}
+          title: "Rakuten model drift alert"
+          text: |
+            {{ range .Alerts }}
+            *{{ .Labels.alertname }}*: {{ .Annotations.summary }}
+            {{ end }}

@@ -64,6 +64,48 @@
           "legendFormat": "{{le}}"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "Prediction drift (PSI vs. training distribution)",
+      "description": "Population Stability Index of the live top-1 class distribution (last 200 predictions) vs. the training set. NaN while the window has fewer than 30 predictions. <0.1 no significant drift, 0.1-0.25 moderate, >0.25 significant.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red", "value": 0.25 }
+            ]
+          },
+          "custom": { "thresholdsStyle": { "mode": "line" } }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "prediction_drift_psi",
+          "legendFormat": "PSI"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Drift window fill (# predictions, max 200)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "max": 200, "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "prediction_drift_window_size",
+          "legendFormat": "window size"
+        }
+      ]
     }
   ]
 }

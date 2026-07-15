@@ -1,20 +1,39 @@
 """
 rakuten_model_training
 =======================
-Prepares the train/val data splits (via DVC) and retrains one of the two
-unimodal models (image or text). Triggered per-model via the Airflow REST
-API by the FastAPI `/retrain` endpoint (see src/api/retrain.py) — the
-`model` param selects which training script runs.
+Prepares the train/val data splits (via DVC, in this container) and retrains
+one of the two unimodal models (image or text) in a fresh, ephemeral
+`trainer` container (see trainer/Dockerfile, docker-compose.yaml). Triggered
+per-model via the Airflow REST API by the FastAPI `/retrain` endpoint (see
+src/api/retrain.py) — the `model` param selects which training script runs.
 
 Run order:
-  prepare_data (dvc repro prepare_splits)
+  prepare_data      (dvc repro prepare_splits, in this container)
       ↓
-  train_model (dvc repro train_image|train_text, model chosen via params)
+  launch_trainer    (DockerOperator: launches a new `trainer` container, which
+                     runs dvc repro train_image|train_text, then exits and is
+                     removed)
+      ↓
+  trigger_promotion (only on launch_trainer success: triggers
+                     rakuten_model_promotion and waits for it, so a
+                     successful retrain's weights land in the serving dir
+                     without a separate manual step)
 
-Both stages go through `dvc repro`, not a bare `python` call — DVC hashes
-deps/outs (dvc.yaml) and skips the run if nothing changed since the last
-successful repro, and records the new model weight's hash in dvc.lock
-when it does run (see docs/methodology_phase2.md §3).
+Why a separate container instead of a subprocess in this one: training a
+full-size ConvNeXt-Base/CamemBERT model needs several GB of RAM. Running it
+as a subprocess of the scheduler meant it competed for memory with every
+other always-on service in the same container -- OOM-killed under any real
+load. The trainer container gets its own mem_limit/shm_size (see
+docker-compose.yaml), launched fresh per run and discarded after, and its
+model/data never touch this container's disk (mlflow, pointed at MinIO,
+i.e. s3-compatible storage, holds the artifact; DVC's own state lives on
+the shared ../:/project mount both containers see).
+
+Airflow talks to docker-socket-proxy (also in this compose file), not the
+raw host Docker socket -- it can create/start/stop containers (what
+DockerOperator needs) but can't touch volumes, exec into unrelated
+containers, or otherwise control the whole host the way raw socket access
+would.
 
 Trigger examples
 -----------------
@@ -23,16 +42,27 @@ Trigger examples
   REST : POST /api/v1/dags/rakuten_model_training/dagRuns
          body: {"conf": {"model": "text"}}
 
-  Smoke test (1 epoch, ~64 train / 16 val rows, minutes not hours — for
-  validating this DAG's plumbing end-to-end, not model quality):
-         body: {"conf": {"model": "text", "smoke_test": true}}
-  Runs with `dvc repro --force` since SMOKE_TEST doesn't change any
-  DVC-tracked dep, so a plain `dvc repro` would otherwise see "nothing
-  changed" and skip the stage.
+  launch_trainer always runs `dvc repro --force --single-item` inside the
+  trainer container: a manual retrain should always actually retrain, even
+  if DVC sees no changed deps since the last run. --single-item scopes
+  --force to the train stage only, so it doesn't also re-run prepare_splits
+  (already done by prepare_data).
+
+  To bound a run's duration/data size (e.g. a real end-to-end check without
+  waiting hours), set MAX_EPOCHS_OVERRIDE / TRAIN_ROWS_OVERRIDE /
+  VAL_ROWS_OVERRIDE in this DAG's environment (see the models' config.py) —
+  there's no dedicated retrain param for this, it's meant for manual runs.
 
 Environment variables
 ---------------------
-  RAKUTEN_PROJECT_DIR : project root (default: /project)
+  RAKUTEN_PROJECT_DIR : project root as seen inside *this* container (default: /project)
+  HOST_PROJECT_DIR    : project root as a real path on the HOST machine
+                         (required -- DockerOperator needs this for the
+                         trainer's bind mount; see the comment above)
+  TRAINER_IMAGE        : trainer image tag (default: the compose-built one)
+  TRAINER_NETWORK      : docker network the trainer container joins, so it
+                          can reach mlflow/postgres/minio (default: the main
+                          stack's compose network)
 """
 
 import os
@@ -42,8 +72,29 @@ from pathlib import Path
 
 from airflow.decorators import dag, task
 from airflow.models.param import Param
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.providers.docker.operators.docker import DockerOperator
+from docker.types import Mount
 
 PROJECT_DIR = Path(os.environ.get("RAKUTEN_PROJECT_DIR", "/project"))
+
+# DockerOperator talks to the HOST's Docker daemon (via docker-socket-proxy)
+# to create a sibling container, not a child of this one -- so a bind mount
+# source must be a path that exists on the HOST, not PROJECT_DIR (which is
+# only valid inside *this* container, via its own ../:/project mount).
+# There's no way to derive the host path from inside a container, so it's a
+# required, separate env var.
+HOST_PROJECT_DIR = os.environ["HOST_PROJECT_DIR"]
+
+TRAINER_IMAGE = os.environ.get(
+    "TRAINER_IMAGE", "mlops-rakuten-product-classification-trainer:latest"
+)
+# docker-compose names networks "<project-dir-name>_default" unless
+# overridden; the main stack's project dir is "mlops-rakuten-product-classification".
+TRAINER_NETWORK = os.environ.get(
+    "TRAINER_NETWORK", "mlops-rakuten-product-classification_default"
+)
+DOCKER_PROXY_URL = os.environ.get("DOCKER_PROXY_URL", "tcp://docker-socket-proxy:2375")
 
 # dvc.yaml stage names, keyed by the same "model" values the /retrain API uses
 TRAIN_STAGES = {
@@ -54,13 +105,12 @@ TRAIN_STAGES = {
 
 @dag(
     dag_id="rakuten_model_training",
-    description="Prepare data splits (DVC) and retrain the image or text model.",
+    description="Prepare data splits (DVC) and retrain the image or text model in an ephemeral trainer container.",
     schedule=None,  # triggered manually or via REST API, per model
     start_date=datetime(2024, 1, 1),
     catchup=False,
     params={
         "model": Param("text", enum=list(TRAIN_STAGES)),
-        "smoke_test": Param(False, type="boolean"),
     },
     tags=["mlops", "training", "rakuten"],
 )
@@ -75,23 +125,47 @@ def rakuten_model_training():
         )
         return "prepared"
 
-    @task
-    def train_model(_: str, **context) -> str:
-        model = context["params"]["model"]
-        smoke_test = context["params"].get("smoke_test", False)
-        if model not in TRAIN_STAGES:
-            raise ValueError(f"Unknown model '{model}'. Choose one of: {list(TRAIN_STAGES)}")
+    launch_trainer = DockerOperator(
+        task_id="launch_trainer",
+        image=TRAINER_IMAGE,
+        docker_url=DOCKER_PROXY_URL,
+        network_mode=TRAINER_NETWORK,
+        auto_remove="success",
+        mount_tmp_dir=False,
+        # Same project-root mount the trainer service uses in docker-compose.yaml
+        # (".:/project") -- DockerOperator needs the equivalent as an absolute
+        # host path since it isn't launched through that compose file.
+        mounts=[Mount(source=HOST_PROJECT_DIR, target="/project", type="bind")],
+        # Matches the `trainer` service's compose config (mem_limit/shm_size)
+        # -- DockerOperator creates the container directly via the Docker API
+        # (through docker-socket-proxy), so it doesn't read docker-compose.yaml
+        # and needs these set here too, or NUM_WORKERS>0 DataLoaders fail with
+        # "unable to allocate shared memory" on Docker's 64MB default.
+        mem_limit="8g",
+        shm_size="2gb",
+        environment={
+            "MODEL": "{{ params.model }}",
+            "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5001"),
+            "MAX_EPOCHS_OVERRIDE": os.environ.get("MAX_EPOCHS_OVERRIDE", ""),
+            "TRAIN_ROWS_OVERRIDE": os.environ.get("TRAIN_ROWS_OVERRIDE", ""),
+            "VAL_ROWS_OVERRIDE": os.environ.get("VAL_ROWS_OVERRIDE", ""),
+        },
+    )
 
-        cmd = ["dvc", "repro", TRAIN_STAGES[model]]
-        env = dict(os.environ)
-        if smoke_test:
-            cmd.append("--force")  # SMOKE_TEST doesn't touch any DVC-tracked dep
-            env["SMOKE_TEST"] = "1"
+    # Runs only if launch_trainer succeeds (default trigger_rule=all_success),
+    # so a failed/OOM-killed training run never promotes stale or half-written
+    # weights. wait_for_completion=True means this dag_run's own "running"
+    # state (what /retrain's list_jobs() lock check looks at) spans the
+    # promotion too, so a second retrain can't start while promotion is
+    # still copying files into the serving dir.
+    trigger_promotion = TriggerDagRunOperator(
+        task_id="trigger_promotion",
+        trigger_dag_id="rakuten_model_promotion",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
 
-        subprocess.run(cmd, cwd=PROJECT_DIR, env=env, check=True)
-        return model
-
-    train_model(prepare_data())
+    prepare_data() >> launch_trainer >> trigger_promotion
 
 
 rakuten_model_training()

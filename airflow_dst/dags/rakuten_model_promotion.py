@@ -48,7 +48,11 @@ CAMEMBERT_BASE_DIR = Path(
 IMAGE_WEIGHTS_SRC = PROJECT_DIR / "models" / "Model_I12_ConvNeXt_Base_ModerateAug_Full" / "best_model_state_dict.pt"
 TEXT_WEIGHTS_SRC  = PROJECT_DIR / "models" / "textModeling" / "Model_T8_CamemBERT_FullFineTune_L128" / "best_model_text.pt"
 LABEL2ID_SRC      = PROJECT_DIR / "outputs" / "image_modeling" / "label2id.json"
-CATEGORY_MAP_SRC  = PROJECT_DIR / "streamlit_app" / "config" / "prdtypecode_mapping.json"
+# prdtypecode_mapping.json is a static prdtypecode->category lookup, not a
+# training/DVC output (no dvc.yaml stage produces it) -- it already lives
+# permanently at CATEGORY_MAP_DST, so there's no separate source to promote
+# it from. The old source (streamlit_app/config/prdtypecode_mapping.json)
+# was deleted in a repo reorg (cc7512a) once this dir became the live copy.
 
 # Serving paths (read by raw_late_fusion_predictor.py)
 SERVING_DIR         = PROJECT_DIR / "data" / "rakuten_streamlit_predictor"
@@ -81,7 +85,7 @@ def rakuten_model_promotion():
     @task
     def check_artifacts() -> dict:
         missing = []
-        for path in [IMAGE_WEIGHTS_SRC, TEXT_WEIGHTS_SRC, LABEL2ID_SRC, CATEGORY_MAP_SRC]:
+        for path in [IMAGE_WEIGHTS_SRC, TEXT_WEIGHTS_SRC, LABEL2ID_SRC, CATEGORY_MAP_DST]:
             if not path.exists():
                 missing.append(str(path))
         if missing:
@@ -128,10 +132,11 @@ def rakuten_model_promotion():
     @task
     def promote_label_maps(artifact_info: dict):
         SERVING_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(LABEL2ID_SRC,      LABEL2ID_DST)
-        shutil.copy2(CATEGORY_MAP_SRC,  CATEGORY_MAP_DST)
+        shutil.copy2(LABEL2ID_SRC, LABEL2ID_DST)
         print(f"label2id.json → {LABEL2ID_DST}")
-        print(f"prdtypecode_mapping.json → {CATEGORY_MAP_DST}")
+        # prdtypecode_mapping.json isn't copied here: it's a static file with
+        # no training-output source, already permanent at CATEGORY_MAP_DST
+        # (see the comment by CATEGORY_MAP_DST's definition above).
 
     @task
     def validate_serving_dir(

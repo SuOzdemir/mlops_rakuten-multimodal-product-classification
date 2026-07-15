@@ -102,12 +102,12 @@ def api_predict(token: str, designation: str, description: str, image: Image.Ima
         return None
 
 
-def api_retrain(token: str, model: str, smoke_test: bool) -> dict | None:
+def api_retrain(token: str, model: str) -> dict | None:
     try:
         resp = requests.post(
             f"{API_URL}/retrain",
             headers={"Authorization": f"Bearer {token}"},
-            data={"model": model, "smoke_test": smoke_test},
+            data={"model": model},
             timeout=15,
         )
         if resp.status_code == 200:
@@ -440,15 +440,11 @@ def render_retrain():
 
     with st.form("retrain_form"):
         model = st.selectbox("Model", ["image", "text"], format_func=lambda m: {"image": "Image — ConvNeXt-Base (I12)", "text": "Text — CamemBERT (T8)"}[m])
-        smoke_test = st.checkbox(
-            "Smoke test (1 epoch, ~64/16 rows — validate the pipeline in minutes, not hours)",
-            value=True,
-        )
         submitted = st.form_submit_button("Start Retrain", use_container_width=True)
 
     if submitted:
         with st.spinner("Triggering Airflow DAG..."):
-            job = api_retrain(st.session_state["token"], model=model, smoke_test=smoke_test)
+            job = api_retrain(st.session_state["token"], model=model)
         if job:
             st.session_state.retrain_job_id = job["job_id"]
             st.success(f"Job started: `{job['job_id']}`")

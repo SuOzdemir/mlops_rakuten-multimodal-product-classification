@@ -32,18 +32,7 @@ def test_start_retrain_triggers_dag_run():
     assert job == {"job_id": "retrain_text_abc", "model": "text", "status": "queued", "started_at": None}
     called_url = mock_post.call_args.args[0]
     assert f"/dags/{DAG_ID}/dagRuns" in called_url
-    assert mock_post.call_args.kwargs["json"]["conf"] == {"model": "text", "smoke_test": False}
-
-
-def test_start_retrain_passes_smoke_test_flag():
-    list_resp = _response(200, {"dag_runs": []})
-    post_resp = _response(200, {"dag_run_id": "retrain_image_abc", "state": "queued", "conf": {"model": "image", "smoke_test": True}})
-
-    with patch("src.api.retrain.requests.get", return_value=list_resp), \
-         patch("src.api.retrain.requests.post", return_value=post_resp) as mock_post:
-        start_retrain(ModelName.image, smoke_test=True)
-
-    assert mock_post.call_args.kwargs["json"]["conf"] == {"model": "image", "smoke_test": True}
+    assert mock_post.call_args.kwargs["json"]["conf"] == {"model": "text"}
 
 
 def test_start_retrain_blocks_duplicate_running_job():
@@ -57,17 +46,19 @@ def test_start_retrain_blocks_duplicate_running_job():
     mock_post.assert_not_called()
 
 
-def test_start_retrain_allows_different_model_while_one_running():
+def test_start_retrain_blocks_different_model_while_one_running():
+    # A different model doesn't get parallelism: every retrain runs `dvc
+    # repro` against the same shared project checkout, and DVC's lock is
+    # repo-wide, not per-stage -- two models retraining at once collide on
+    # it instead of actually running in parallel.
     existing_run = {"dag_run_id": "retrain_text_old", "state": "running", "conf": {"model": "text"}}
     list_resp = _response(200, {"dag_runs": [existing_run]})
-    post_resp = _response(200, {"dag_run_id": "retrain_image_new", "state": "queued", "conf": {"model": "image"}})
 
     with patch("src.api.retrain.requests.get", return_value=list_resp), \
-         patch("src.api.retrain.requests.post", return_value=post_resp):
-        job = start_retrain(ModelName.image)
-
-    assert job["model"] == "image"
-    assert job["status"] == "queued"
+         patch("src.api.retrain.requests.post") as mock_post:
+        with pytest.raises(RuntimeError):
+            start_retrain(ModelName.image)
+    mock_post.assert_not_called()
 
 
 def test_get_status_maps_success_to_completed():

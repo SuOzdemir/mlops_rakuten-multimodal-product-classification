@@ -1,4 +1,4 @@
-.PHONY: install setup-data prepare-splits up serve up-all down down-all logs health airflow-up airflow-down airflow-logs test manual-up manual-down manual-up-all manual-down-all
+.PHONY: install setup-data prepare-splits up serve up-all down down-all restart-all logs health airflow-up airflow-down airflow-logs test manual-up manual-down manual-up-all manual-down-all
 
 # Local dev/training environment (pyproject.toml): notebooks, training scripts
 install:
@@ -15,13 +15,27 @@ prepare-splits:
 # Serving stack: postgres -> mlflow -> api -> streamlit (order handled by depends_on/healthcheck)
 # --wait blocks until all healthchecks pass, so `up-all`'s `up` then `airflow-up`
 # ordering is safe (Airflow's DB needs postgres to actually be ready, not just started).
+# Refuses to start if manual-up's native processes already hold the same ports
+# (5001/8000/8501) — both modes bound to the same port at once means whichever
+# one didn't win the socket silently never receives traffic, e.g. mlflow's
+# Host-header check rejecting requests that actually reached the *other* mlflow.
 up:
+	@if pgrep -f "mlflow server" >/dev/null || pgrep -f "uvicorn src.api.main:app" >/dev/null || pgrep -f "streamlit run streamlit_app/Home.py" >/dev/null; then \
+		echo "ERROR: manual-up's native processes (mlflow/api/streamlit) are still running on ports 5001/8000/8501."; \
+		echo "Run 'make manual-down' first, or use manual-up-all instead of the Docker stack."; \
+		exit 1; \
+	fi
 	docker compose up --build -d --wait
 
 # Everything: serving stack (mlflow+api+streamlit) + Airflow (own compose stack/network)
 up-all: up airflow-up
 
 down-all: down airflow-down
+
+# Full stop then full start in one command -- for after a Docker Desktop
+# restart, a host resource crunch, or just "did I break something, reset
+# and check" without typing two commands.
+restart-all: down-all up-all
 
 # Just api (:8000) + streamlit (:8501), no mlflow — same ports every time
 serve:
@@ -53,9 +67,21 @@ test:
 
 # Same serving stack as `up`, but without Docker: mlflow + api + streamlit as
 # background local processes (uv run), logs go to *.log (gitignored).
+# Refuses to start if the Docker stack is already up on the same ports — see
+# the matching guard on `up` for why running both at once is broken, not just
+# wasteful.
 manual-up:
-	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri sqlite:///mlruns/mlflow.db --default-artifact-root ./mlruns/artifacts > mlflow.log 2>&1 &
-	MLFLOW_TRACKING_URI=http://localhost:5001 AIRFLOW_API_URL=http://localhost:8080 uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
+	@if [ -n "$$(docker compose ps -q mlflow api streamlit 2>/dev/null)" ]; then \
+		echo "ERROR: docker compose stack (mlflow/api/streamlit) is already running on ports 5001/8000/8501."; \
+		echo "Run 'make down' first, or use the Docker stack instead of manual-up."; \
+		exit 1; \
+	fi
+	# Same Postgres (published on localhost:5432 by the `postgres` service) and
+	# the same ./mlruns/artifacts dir as the Docker mlflow -- one shared run
+	# history regardless of which mode started it, instead of a second,
+	# disconnected SQLite-backed mlflow.
+	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri postgresql://mlflow:mlflow@localhost:5432/mlflow --artifacts-destination ./mlruns/artifacts --serve-artifacts > mlflow.log 2>&1 &
+	MLFLOW_TRACKING_URI=http://localhost:5001 AIRFLOW_API_URL=http://localhost:8080 DATABASE_URL=postgresql://api:api@localhost:5432/api uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
 	API_URL=http://localhost:8000 uv run streamlit run streamlit_app/Home.py --server.port 8501 > streamlit.log 2>&1 &
 
 # Kills the background processes started by manual-up (matched by command line)

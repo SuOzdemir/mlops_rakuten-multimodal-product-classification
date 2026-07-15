@@ -3,3 +3,6 @@ CREATE DATABASE mlflow OWNER mlflow;
 
 CREATE USER airflow WITH PASSWORD 'airflow';
 CREATE DATABASE airflow OWNER airflow;
+
+CREATE USER api WITH PASSWORD 'api';
+CREATE DATABASE api OWNER api;

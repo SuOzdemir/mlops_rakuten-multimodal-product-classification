@@ -108,10 +108,15 @@ def main() -> None:
     train_df["label_id"] = train_df["prdtypecode"].astype(str).map(str_label2id)
     val_df["label_id"]   = val_df["prdtypecode"].astype(str).map(str_label2id)
 
-    if config.SMOKE_TEST:
-        train_df = train_df.sample(n=min(config.SMOKE_TEST_TRAIN_ROWS, len(train_df)), random_state=config.SEED).reset_index(drop=True)
-        val_df = val_df.sample(n=min(config.SMOKE_TEST_VAL_ROWS, len(val_df)), random_state=config.SEED).reset_index(drop=True)
-        print(f"[SMOKE_TEST] Sampled down to {len(train_df)} train / {len(val_df)} val rows")
+    if config.TRAIN_ROWS_OVERRIDE or config.VAL_ROWS_OVERRIDE:
+        # No random_state here on purpose: this sample is meant to change
+        # every run (a quick/bounded sanity check), unlike the rest of
+        # training which stays seeded for reproducibility.
+        if config.TRAIN_ROWS_OVERRIDE:
+            train_df = train_df.sample(n=min(config.TRAIN_ROWS_OVERRIDE, len(train_df))).reset_index(drop=True)
+        if config.VAL_ROWS_OVERRIDE:
+            val_df = val_df.sample(n=min(config.VAL_ROWS_OVERRIDE, len(val_df))).reset_index(drop=True)
+        print(f"[TRAIN_ROWS_OVERRIDE] Sampled down to {len(train_df)} train / {len(val_df)} val rows (random each run)")
 
     num_classes = len(label2id)
     print(f"Classes : {num_classes}")
@@ -125,7 +130,7 @@ def main() -> None:
     model = CamembertForSequenceClassification.from_pretrained(
         str(config.LOCAL_MODEL_PATH),
         num_labels=num_classes,
-        ignore_mismatched_sizes=True,  # LOCAL_MODEL_PATH's head is sized for 27 classes; reinit if num_classes differs (e.g. SMOKE_TEST)
+        ignore_mismatched_sizes=True,  # LOCAL_MODEL_PATH's head is sized for 27 classes; reinit if num_classes differs
     )
     model = model.to(device)
 
@@ -200,6 +205,9 @@ def main() -> None:
     start_time = time.time()
 
     for epoch in range(start_epoch, config.MAX_EPOCHS + 1):
+
+        print(f"\n--- Epoch {epoch}/{config.MAX_EPOCHS} starting "
+              f"({time.time() - start_time:.0f}s since training start) ---")
 
         train_loss, train_acc, train_macro_f1, train_weighted_f1 = run_epoch(
             model, train_loader, device, optimizer, scaler
