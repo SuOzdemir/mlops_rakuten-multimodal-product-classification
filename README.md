@@ -14,8 +14,9 @@ Multimodal (text + image) product category classification for the Rakuten France
 | Val Macro F1 — ConvNeXt-Base (image) | Model quality | **0.692** |
 | Val Macro F1 — Late fusion (α=0.45) | Model quality | **~0.893** |
 | Public leaderboard rank | Business | Top 5 ([challengedata.ens.fr](https://challengedata.ens.fr/participants/challenges/35/ranking/public)) |
-| API test coverage | Engineering | 22 unit tests, gated in CI on every push/PR |
-| Serving latency / uptime / drift | Ops | Not yet instrumented — no Prometheus/Grafana or drift monitoring in place |
+| API test coverage | Engineering | 45 unit tests, gated in CI on every push/PR |
+| Serving latency / uptime | Ops | Prometheus + Grafana (`Rakuten API Overview` dashboard) |
+| Prediction drift | Ops | PSI-based tracker, alerted via Grafana → Slack when it crosses 0.25 for 2 minutes |
 
 See [docs/methodology_phase1.md](docs/methodology_phase1.md) for modeling detail and [docs/methodology_phase2.md](docs/methodology_phase2.md) for the MLOps pipeline.
 
@@ -24,14 +25,33 @@ See [docs/methodology_phase1.md](docs/methodology_phase1.md) for modeling detail
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      docker-compose                          │
-│                                                              │
-│  ┌─────────────┐    ┌──────────────┐    ┌─────────────────┐ │
-│  │  Streamlit  │───▶│  FastAPI     │    │     MLflow      │ │
-│  │   :8501     │    │   :8000      │───▶│     :5000       │ │
-│  └─────────────┘    └──────────────┘    └─────────────────┘ │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                         docker-compose (main stack)                        │
+│                                                                            │
+│  ┌────────────┐   ┌─────────────┐        ┌────────┐      ┌─────────────┐ │
+│  │ Streamlit  │──▶│  FastAPI    │───────▶ │ MLflow │────▶ │   MinIO     │ │
+│  │  :8501     │   │  :8000      │         │ :5001  │      │ :9000/9001  │ │
+│  └────────────┘   └──────┬──────┘        └───┬────┘      └─────────────┘ │
+│                          │                    │        (artifacts + DVC   │
+│                          ▼                    ▼            remote data)  │
+│                    ┌───────────┐        ┌───────────┐                    │
+│                    │ Prometheus│──────▶ │  Grafana  │──▶ Slack (alerts)  │
+│                    │  :9090    │        │  :3000    │                    │
+│                    └───────────┘        └───────────┘                    │
+│                          ▲                    │                          │
+│                          │              ┌───────────┐                    │
+│                          └──────────────│ Postgres  │ (mlflow/airflow/   │
+│                                         │  :5432    │  api auth DBs)     │
+│                                         └───────────┘                    │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   airflow_dst compose (separate network)                   │
+│                                                                            │
+│   Airflow  ──▶  launch_trainer (DockerOperator, via docker-socket-proxy)  │
+│   :8080         ──▶ ephemeral `trainer` container (dvc repro train_*)     │
+│                 ──▶ on success, triggers rakuten_model_promotion DAG      │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Request flow
@@ -116,26 +136,105 @@ outputs/image_modeling/        →   label2id.json
 
 The DAG runs manually (triggered after training) and validates the serving directory before finishing.
 
-### Retrain pipeline (Airflow DAG + DVC + API)
+### Retrain pipeline (Airflow DAG + ephemeral trainer + DVC + API)
 
-`POST /retrain` (admin only) doesn't run training itself — it triggers the Airflow DAG `rakuten_model_training` via Airflow's REST API, so the long-running job lives in Airflow (retries, logs, concurrency all handled there) instead of inside the FastAPI process.
+`POST /retrain` (admin only) doesn't run training itself — it triggers the Airflow DAG `rakuten_model_training` via Airflow's REST API. That DAG doesn't run training as a subprocess of its own scheduler either: it launches a fresh, throwaway **`trainer`** container per run (via `DockerOperator`), does the job, and is removed. Rationale, and why this replaced an earlier design that ran training as a subprocess inside the always-on Airflow scheduler:
 
 ```
 POST /retrain {model: image|text}   (admin)
    → API calls Airflow REST API: POST /api/v1/dags/rakuten_model_training/dagRuns
         ↓
-   DAG: prepare_data (dvc repro prepare_splits)
+   DAG: prepare_data     (dvc repro prepare_splits, in the scheduler -- cheap, no ML deps)
         ↓
-   DAG: train_model  (python -m models.<...>.train, model from dag_run conf)
+   DAG: launch_trainer   (DockerOperator, via docker-socket-proxy, launches a fresh
+                          `trainer` container: dvc repro train_image|train_text --force
+                          --single-item, model from dag_run conf; container is removed
+                          on success)
 
 GET /retrain            → list all dag runs (any authenticated user)
 GET /retrain/{job_id}   → poll a specific dag run's status
 ```
 
+Why an ephemeral container instead of a subprocess: a full-size ConvNeXt-Base/CamemBERT
+training run needs several GB of RAM. Running it as a subprocess of the Airflow
+scheduler meant it competed for memory with every other always-on service sharing that
+one container — reliably OOM-killed under any real load. The `trainer` container gets
+its own `mem_limit`/`shm_size` (`docker-compose.yaml`), is launched fresh per run and
+discarded after, and its model/data never touch any always-on container's disk:
+
+- **MLflow's artifact store is MinIO** (S3-compatible, `docker-compose.yaml`'s `minio` +
+  `minio-init` services), not a bind-mounted host directory — `mlflow` is configured with
+  `--artifacts-destination s3://mlflow-artifacts/ --serve-artifacts`, so it proxies all
+  artifact I/O itself; the `trainer` container never needs MinIO credentials, only
+  `MLFLOW_TRACKING_URI`.
+- **Airflow talks to `docker-socket-proxy`**, not the raw host Docker socket — it can
+  create/start/stop containers (what `DockerOperator` needs) but can't touch volumes,
+  exec into unrelated containers, or otherwise control the whole host the way raw socket
+  access would.
+- **`scripts/diagnose_disk.sh`** reports what's actually consuming disk (Docker build
+  cache, named volumes, MinIO bucket contents, or the repo's own checkpoints) — read-only,
+  doesn't delete anything.
+
+Known limitations, still open:
+- **DVC's lock is repo-wide, not per-stage.** Every retrain runs `dvc repro` against the
+  same shared project checkout (`HOST_PROJECT_DIR` bind-mounted into the trainer), so two
+  retrains — even different models — collide on `.dvc/tmp/rwlock` if run concurrently.
+  `src/api/retrain.py`'s `start_retrain` enforces one retrain (any model) at a time for
+  this reason; it's an application-level mutex working around a DVC constraint, not a
+  Docker-level fix.
+- **`mem_limit`/`shm_size` are per-container caps, not reservations.** They don't create
+  headroom beyond Docker Desktop's total VM memory (Settings → Resources → Memory) — if
+  the always-on services plus the trainer's actual usage together exceed that ceiling,
+  the OOM kill returns regardless of ephemeral isolation. Raising the VM's own memory
+  ceiling is what actually fixes it; the ephemeral pattern only makes the accounting
+  legible and stops one job from starving another indefinitely.
+
+**Production equivalents**, since none of the above is meant to be the final shape at
+scale — this is what a laptop-scale Docker Compose setup approximates:
+- **MinIO → managed object storage** (S3, GCS, R2). Self-hosting MinIO with a single
+  Docker volume doesn't scale storage/durability the way a managed bucket does; MinIO
+  in production means a real distributed deployment (Kubernetes StatefulSet + PVCs on
+  real block storage), not a docker-compose volume.
+- **`DockerOperator` + `docker-socket-proxy` → `KubernetesPodOperator` / a managed
+  training job** (SageMaker Training Job, Vertex AI Custom Training, a GKE/EKS Job).
+  The principle both share: the orchestrator (Airflow) never *is* the compute — it
+  submits a job with its own resource request to something that actually has the
+  resources, then polls. `docker-socket-proxy` is the local-dev stand-in for the
+  same trust boundary a Kubernetes RBAC role or IAM role would enforce in production
+  (Airflow's worker can launch training jobs; it can't touch unrelated infrastructure).
+- **Docker Desktop's shared VM memory ceiling → real, separately-provisioned compute**
+  (a GPU node, a right-sized training instance) with no shared ceiling against
+  always-on services at all — the laptop-scale constraint simply doesn't exist once
+  training and serving are on genuinely separate machines.
+
+Also still true from the original design:
 - **`scripts/prepare_splits.py`** builds `outputs/image_modeling/{train_split,val_split}.csv` + `label2id.json` from the raw Kaggle CSVs (`data/raw/X_train.csv`, `Y_train.csv`) — both I12 and T8 read from the same split so image/text models are evaluated on identical held-out products.
 - **`dvc.yaml`** wraps that script as a pipeline stage (`prepare_splits`) — `dvc repro` only re-runs it if the raw data or script changed.
-- The Airflow container reaches the API's host via `AIRFLOW_API_URL` (default `http://host.docker.internal:8080`, since `airflow_dst` is a separate compose stack on its own network); Basic Auth uses the `admin`/`admin` user created by `airflow-init`.
 - Requires the raw Kaggle dataset in `data/raw/` (`./scripts/setup_data.sh`) — without it, `dvc repro` fails at the `prepare_data` task, which is expected until the dataset is downloaded on the machine running Airflow.
+
+---
+
+## Monitoring & Drift Detection
+
+### Metrics (Prometheus + Grafana)
+
+The API exposes Prometheus metrics at `/metrics` (`prometheus-fastapi-instrumentator`): request rate, latency (p50/p95), and error rate per endpoint. `monitoring/prometheus/prometheus.yml` scrapes it every 5s, from either the Docker service name (`api-docker` job) or `host.docker.internal` (`api-manual` job, for `make manual-up`). Grafana auto-provisions a **Rakuten API Overview** dashboard on startup — no manual setup.
+
+### Prediction drift (PSI)
+
+`src/api/drift.py` tracks whether the live mix of predicted categories is drifting away from the training set's class distribution:
+
+| | |
+|---|---|
+| Metric | Population Stability Index (PSI) — `<0.1` none, `0.1–0.25` moderate, `>0.25` significant |
+| Reference | `src/api/reference_class_distribution.json` (training-set class distribution, generated by `scripts/compute_reference_distribution.py`, keyed by `prdtypecode`) |
+| Live data | In-memory `deque(maxlen=200)` of the last 200 predictions — resets on API restart, no DB needed for a single-process demo |
+| Scoring | Needs ≥30 recorded predictions before scoring at all (`MIN_PREDICTIONS_FOR_SCORE`); exposed as Prometheus gauges `prediction_drift_psi` / `prediction_drift_window_size` |
+| Alerting | `monitoring/grafana/provisioning/alerting/` (`rules.yaml`, `contactpoints.yaml`, `policies.yaml`) — fires when PSI stays **> 0.25 for 2 consecutive minutes**, routed to Slack via `SLACK_WEBHOOK_URL` (set in a local, gitignored `.env`; see `.env.example`) |
+
+### What's not covered yet
+
+Input-feature drift, live model-performance decay (accuracy/F1 against real ground truth), Airflow pipeline-failure alerting, data-quality checks, and infra-resource alerts (disk/OOM) have no code yet — see the Streamlit app's Monitoring page for a full breakdown of what's built vs. open per category.
 
 ---
 
@@ -162,33 +261,45 @@ GET /retrain/{job_id}   → poll a specific dag run's status
 
 ```
 .
-├── docker-compose.yaml              # MLflow + API + Streamlit + Prometheus + Grafana
+├── docker-compose.yaml              # API + Streamlit + MLflow + MinIO + Postgres + Prometheus + Grafana
 ├── pyproject.toml                   # Python dependencies (uv) — dev/training env
-├── Makefile                         # make up / airflow-up / test / health shortcuts
+├── Makefile                         # make up / airflow-up / test / health / restart-all shortcuts
 ├── .github/workflows/ci.yml         # pytest + Docker build checks on push/PR
 ├── dvc.yaml                         # DVC pipeline: raw CSVs -> train/val splits
-├── .dvc/                            # DVC metadata (dvc init)
+├── .dvc/                            # DVC metadata (config: MinIO remote; config.local: per-machine creds, gitignored)
+├── .env.example                     # Template for the root .env (SLACK_WEBHOOK_URL, gitignored)
 │
 ├── models/
 │   ├── Model_I12_ConvNeXt_Base_*/   # Image model training
 │   └── textModeling/
 │       └── Model_T8_CamemBERT_*/    # Text model training
 │
+├── trainer/                          # Ephemeral training container (launched by the training DAG)
+│   ├── Dockerfile                    # CPU-only torch + mlflow/dvc deps
+│   ├── entrypoint.sh                 # dvc repro prepare_splits && dvc repro train_$MODEL --force
+│   └── requirements.txt
+│
 ├── scripts/
-│   ├── setup_data.sh                # Downloads raw Kaggle dataset -> data/raw/
-│   ├── prepare_splits.py            # DVC stage: builds train/val split CSVs + label2id.json
+│   ├── setup_data.sh                 # Downloads raw Kaggle dataset -> data/raw/
+│   ├── prepare_splits.py             # DVC stage: builds train/val split CSVs + label2id.json
+│   ├── compute_reference_distribution.py  # Builds src/api/reference_class_distribution.json (drift baseline)
+│   ├── diagnose_disk.sh              # Read-only: what's consuming disk (Docker vs. repo vs. volumes)
+│   ├── git-helper.sh                 # Git shortcuts for contributors without a GUI git client
 │   ├── run_api.sh / run_streamlit.sh
 │
 ├── src/
 │   └── api/
-│       ├── main.py                  # FastAPI: /login /logout /predict /retrain
+│       ├── main.py                  # FastAPI: /login /logout /predict /retrain /metrics
 │       ├── retrain.py               # Calls Airflow REST API to trigger training DAG
-│       ├── db.py                    # SQLite user store
+│       ├── drift.py                 # Prediction-drift PSI tracker
+│       ├── reference_class_distribution.json  # Training-set class distribution (drift baseline)
+│       ├── db.py                    # Postgres-backed user store
 │       ├── Dockerfile
 │       └── requirements.txt
 │
 ├── streamlit_app/
-│   ├── Home.py                      # Login + Prediction UI
+│   ├── Home.py                      # Login + Prediction + Retrain (admin) UI
+│   ├── project_story.py             # Walkthrough pages: Overview/Data/Tracking/Orchestration/Monitoring/Links
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── services/
@@ -196,15 +307,17 @@ GET /retrain/{job_id}   → poll a specific dag run's status
 │
 ├── monitoring/
 │   ├── prometheus/prometheus.yml     # Scrapes api /metrics (docker + manual-up targets)
-│   └── grafana/                      # Auto-provisioned datasource + "Rakuten API Overview" dashboard
+│   └── grafana/
+│       ├── dashboards/                # Auto-provisioned "Rakuten API Overview" dashboard
+│       └── provisioning/alerting/     # Prediction-drift alert rule, Slack contact point, routing policy
 │
 ├── airflow_dst/
-│   ├── docker-compose.yaml          # Airflow stack (own network, built image)
-│   ├── Dockerfile                   # apache/airflow:2.10.0 + mlflow client + dvc + torch(cpu)
+│   ├── docker-compose.yaml          # Airflow stack (own network, built image, docker-socket-proxy)
+│   ├── Dockerfile                   # apache/airflow:2.10.0 + mlflow client + dvc (no torch — training moved to trainer/)
 │   ├── requirements.txt
 │   └── dags/
 │       ├── rakuten_model_promotion.py    # Model promotion DAG
-│       └── rakuten_model_training.py     # DVC prep + train DAG (triggered by /retrain)
+│       └── rakuten_model_training.py     # DVC prep + launch_trainer + trigger_promotion DAG
 │
 ├── data/                            # Not in git
 │   ├── raw/                         # Rakuten dataset (CSV + images)
@@ -249,7 +362,7 @@ Check all serving-stack services are healthy: `make health`
 
 ### Credentials
 
-Users are stored in a SQLite DB (`config/users.db`, gitignored), created and seeded automatically on first API startup. Passwords are salted + hashed (PBKDF2-HMAC-SHA256), never stored in plain text.
+Users are stored in the shared Postgres instance (`api` database, `DATABASE_URL` in `docker-compose.yaml` — same Postgres server as MLflow/Airflow, one database server instead of separate SQLite files per service), created and seeded automatically on first API startup. Passwords are salted + hashed (PBKDF2-HMAC-SHA256, 100k iterations), never stored in plain text.
 
 | Username | Password | Role |
 |----------|----------|------|
@@ -257,6 +370,15 @@ Users are stored in a SQLite DB (`config/users.db`, gitignored), created and see
 | `user` | `user` | `viewer` |
 
 The `role` field is stored per-user but not yet enforced on any endpoint — every authenticated user currently has the same access (no admin-only routes exist yet).
+
+### DVC remote (MinIO)
+
+`dvc push`/`dvc pull` share DVC-tracked data/models via the local MinIO instance (`s3://dvc-data`, same MinIO MLflow's artifacts use — started by `make up`). The remote's URL/endpoint (`.dvc/config`) is committed, but credentials are per-machine and gitignored (`.dvc/config.local`) — run this once after cloning:
+
+```bash
+dvc remote modify --local minio access_key_id minioadmin
+dvc remote modify --local minio secret_access_key minioadmin
+```
 
 ### Run tests
 
@@ -273,7 +395,7 @@ python -m pytest tests/ -v
 ### CI
 
 Every push/PR to `main` runs via GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
-- `test` — `uv sync` + `pytest tests/` (22 tests, mocked model assets — no GPU/weights needed)
+- `test` — `uv sync` + `pytest tests/` (45 tests, mocked model assets — no GPU/weights needed)
 - `docker-build` — builds the `api`, `streamlit`, and `airflow` images to catch Dockerfile breakage before merge (does not push)
 
 ---
@@ -289,11 +411,13 @@ Every push/PR to `main` runs via GitHub Actions ([.github/workflows/ci.yml](.git
 | Text models | CamemBERT (camembert-base) |
 | API | FastAPI + Uvicorn |
 | Frontend | Streamlit |
-| Experiment tracking | MLflow |
-| Orchestration | Apache Airflow |
+| Experiment tracking | MLflow (Postgres backend store, MinIO artifact store) |
+| Object storage | MinIO (S3-compatible — MLflow artifacts + DVC remote) |
+| Database | Postgres (shared: MLflow, Airflow metadata, API auth) |
+| Orchestration | Apache Airflow (DockerOperator-launched ephemeral `trainer` container) |
 | Containerisation | Docker, Docker Compose |
 | CI | GitHub Actions |
-| Monitoring | Not yet implemented — see [Roadmap](#roadmap) |
+| Monitoring | Prometheus + Grafana, PSI-based prediction-drift alerting → Slack |
 
 ---
 
@@ -303,9 +427,12 @@ Known gaps, not yet built:
 
 | Item | What it would add |
 |------|--------------------|
-| Drift detection (e.g. Evidently) | Compare live prediction/input distribution against the training set to catch model decay |
 | MLflow ↔ Airflow (promotion) | Promotion DAG picks the best run from MLflow (Model Registry) instead of a fixed local file path — separate from the retrain DAG's `/retrain` trigger, which is already wired |
-| DVC remote | `dvc.yaml` works locally (cache-based reproducibility) but has no configured remote yet — needed to `dvc push`/`pull` data across machines/CI |
+| Input-feature drift | Compare live input (text/image) distribution against the training set, not just predicted classes (see [Monitoring & Drift Detection](#monitoring--drift-detection)) |
+| Live model-performance decay | Score accuracy/F1 against real ground truth once labels become available, instead of only offline eval at training time |
+| Pipeline-failure alerting | Airflow DAG failures (training/promotion) don't currently notify anyone — no `on_failure_callback`/retries configured |
+| Data-quality checks | No runtime validation of missing values or unexpected `prdtypecode`/schema in `prepare_splits.py` |
+| Infra-resource alerts | Docker healthchecks exist, but disk usage / container OOM aren't scraped by Prometheus (no node-exporter/cadvisor) |
 
 ---
 
