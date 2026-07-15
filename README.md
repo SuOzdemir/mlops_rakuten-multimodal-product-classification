@@ -150,62 +150,34 @@ POST /retrain {model: image|text}   (admin)
                           `trainer` container: dvc repro train_image|train_text --force
                           --single-item, model from dag_run conf; container is removed
                           on success)
+        ↓
+   DAG: trigger_promotion (on success, triggers rakuten_model_promotion and waits for it)
 
 GET /retrain            → list all dag runs (any authenticated user)
 GET /retrain/{job_id}   → poll a specific dag run's status
 ```
 
 Why an ephemeral container instead of a subprocess: a full-size ConvNeXt-Base/CamemBERT
-training run needs several GB of RAM. Running it as a subprocess of the Airflow
-scheduler meant it competed for memory with every other always-on service sharing that
-one container — reliably OOM-killed under any real load. The `trainer` container gets
-its own `mem_limit`/`shm_size` (`docker-compose.yaml`), is launched fresh per run and
-discarded after, and its model/data never touch any always-on container's disk:
+training run needs several GB of RAM, and running it as a subprocess of the Airflow
+scheduler meant it competed for memory with every other always-on service in that
+container — it got OOM-killed under any real load. The `trainer` container gets its own
+`mem_limit`/`shm_size` (`docker-compose.yaml`), is launched fresh per run, and is
+discarded after.
 
-- **MLflow's artifact store is MinIO** (S3-compatible, `docker-compose.yaml`'s `minio` +
-  `minio-init` services), not a bind-mounted host directory — `mlflow` is configured with
-  `--artifacts-destination s3://mlflow-artifacts/ --serve-artifacts`, so it proxies all
-  artifact I/O itself; the `trainer` container never needs MinIO credentials, only
-  `MLFLOW_TRACKING_URI`.
-- **Airflow talks to `docker-socket-proxy`**, not the raw host Docker socket — it can
-  create/start/stop containers (what `DockerOperator` needs) but can't touch volumes,
-  exec into unrelated containers, or otherwise control the whole host the way raw socket
-  access would.
-- **`scripts/diagnose_disk.sh`** reports what's actually consuming disk (Docker build
-  cache, named volumes, MinIO bucket contents, or the repo's own checkpoints) — read-only,
-  doesn't delete anything.
-
-Known limitations, still open:
-- **DVC's lock is repo-wide, not per-stage.** Every retrain runs `dvc repro` against the
-  same shared project checkout (`HOST_PROJECT_DIR` bind-mounted into the trainer), so two
-  retrains — even different models — collide on `.dvc/tmp/rwlock` if run concurrently.
-  `src/api/retrain.py`'s `start_retrain` enforces one retrain (any model) at a time for
-  this reason; it's an application-level mutex working around a DVC constraint, not a
-  Docker-level fix.
-- **`mem_limit`/`shm_size` are per-container caps, not reservations.** They don't create
-  headroom beyond Docker Desktop's total VM memory (Settings → Resources → Memory) — if
-  the always-on services plus the trainer's actual usage together exceed that ceiling,
-  the OOM kill returns regardless of ephemeral isolation. Raising the VM's own memory
-  ceiling is what actually fixes it; the ephemeral pattern only makes the accounting
-  legible and stops one job from starving another indefinitely.
-
-**Production equivalents**, since none of the above is meant to be the final shape at
-scale — this is what a laptop-scale Docker Compose setup approximates:
-- **MinIO → managed object storage** (S3, GCS, R2). Self-hosting MinIO with a single
-  Docker volume doesn't scale storage/durability the way a managed bucket does; MinIO
-  in production means a real distributed deployment (Kubernetes StatefulSet + PVCs on
-  real block storage), not a docker-compose volume.
-- **`DockerOperator` + `docker-socket-proxy` → `KubernetesPodOperator` / a managed
-  training job** (SageMaker Training Job, Vertex AI Custom Training, a GKE/EKS Job).
-  The principle both share: the orchestrator (Airflow) never *is* the compute — it
-  submits a job with its own resource request to something that actually has the
-  resources, then polls. `docker-socket-proxy` is the local-dev stand-in for the
-  same trust boundary a Kubernetes RBAC role or IAM role would enforce in production
-  (Airflow's worker can launch training jobs; it can't touch unrelated infrastructure).
-- **Docker Desktop's shared VM memory ceiling → real, separately-provisioned compute**
-  (a GPU node, a right-sized training instance) with no shared ceiling against
-  always-on services at all — the laptop-scale constraint simply doesn't exist once
-  training and serving are on genuinely separate machines.
+A few things worth knowing:
+- MLflow's artifact store is MinIO (S3-compatible), not a bind-mounted directory, so the
+  `trainer` container never needs storage credentials — only `MLFLOW_TRACKING_URI`.
+- Airflow talks to `docker-socket-proxy`, not the raw host Docker socket, so
+  `DockerOperator` can launch/stop containers but can't touch volumes or anything else
+  on the host.
+- DVC's lock is repo-wide, not per-stage, so two retrains — even of different models —
+  collide on `.dvc/tmp/rwlock` if run concurrently. `src/api/retrain.py` enforces one
+  retrain at a time for this reason.
+- `mem_limit`/`shm_size` cap the trainer's own usage, but don't add headroom beyond
+  Docker Desktop's overall VM memory ceiling — that still needs raising separately if
+  the always-on services plus training together exceed it.
+- `scripts/diagnose_disk.sh` is a read-only helper for figuring out what's actually
+  eating disk (Docker build cache, named volumes, or the repo's own checkpoints).
 
 Also still true from the original design:
 - **`scripts/prepare_splits.py`** builds `outputs/image_modeling/{train_split,val_split}.csv` + `label2id.json` from the raw Kaggle CSVs (`data/raw/X_train.csv`, `Y_train.csv`) — both I12 and T8 read from the same split so image/text models are evaluated on identical held-out products.
@@ -216,25 +188,15 @@ Also still true from the original design:
 
 ## Monitoring & Drift Detection
 
-### Metrics (Prometheus + Grafana)
+The API exposes Prometheus metrics at `/metrics` (`prometheus-fastapi-instrumentator`): request rate, latency (p50/p95), and error rate per endpoint. `monitoring/prometheus/prometheus.yml` scrapes it every 5s, and Grafana auto-provisions a **Rakuten API Overview** dashboard on startup.
 
-The API exposes Prometheus metrics at `/metrics` (`prometheus-fastapi-instrumentator`): request rate, latency (p50/p95), and error rate per endpoint. `monitoring/prometheus/prometheus.yml` scrapes it every 5s, from either the Docker service name (`api-docker` job) or `host.docker.internal` (`api-manual` job, for `make manual-up`). Grafana auto-provisions a **Rakuten API Overview** dashboard on startup — no manual setup.
+`src/api/drift.py` also tracks prediction drift — whether the live mix of predicted categories is drifting away from the training set's class distribution:
+- Metric: Population Stability Index (PSI) — `<0.1` none, `0.1–0.25` moderate, `>0.25` significant
+- Compared against `src/api/reference_class_distribution.json` (built by `scripts/compute_reference_distribution.py`)
+- Scored over the last 200 predictions (in-memory, resets on API restart), needs at least 30 before it scores at all
+- Exposed as Prometheus gauges `prediction_drift_psi` / `prediction_drift_window_size`, and alerted on in Grafana (`monitoring/grafana/provisioning/alerting/`) — fires when PSI stays above 0.25 for 2 minutes, routed to Slack via `SLACK_WEBHOOK_URL` (see `.env.example`)
 
-### Prediction drift (PSI)
-
-`src/api/drift.py` tracks whether the live mix of predicted categories is drifting away from the training set's class distribution:
-
-| | |
-|---|---|
-| Metric | Population Stability Index (PSI) — `<0.1` none, `0.1–0.25` moderate, `>0.25` significant |
-| Reference | `src/api/reference_class_distribution.json` (training-set class distribution, generated by `scripts/compute_reference_distribution.py`, keyed by `prdtypecode`) |
-| Live data | In-memory `deque(maxlen=200)` of the last 200 predictions — resets on API restart, no DB needed for a single-process demo |
-| Scoring | Needs ≥30 recorded predictions before scoring at all (`MIN_PREDICTIONS_FOR_SCORE`); exposed as Prometheus gauges `prediction_drift_psi` / `prediction_drift_window_size` |
-| Alerting | `monitoring/grafana/provisioning/alerting/` (`rules.yaml`, `contactpoints.yaml`, `policies.yaml`) — fires when PSI stays **> 0.25 for 2 consecutive minutes**, routed to Slack via `SLACK_WEBHOOK_URL` (set in a local, gitignored `.env`; see `.env.example`) |
-
-### What's not covered yet
-
-Input-feature drift, live model-performance decay (accuracy/F1 against real ground truth), Airflow pipeline-failure alerting, data-quality checks, and infra-resource alerts (disk/OOM) have no code yet — see the Streamlit app's Monitoring page for a full breakdown of what's built vs. open per category.
+Not covered yet: input-feature drift, live model-performance decay against real ground truth, Airflow pipeline-failure alerts, data-quality checks, and infra-resource alerts. See the Streamlit app's Monitoring page for the full breakdown of what's built vs. open.
 
 ---
 
