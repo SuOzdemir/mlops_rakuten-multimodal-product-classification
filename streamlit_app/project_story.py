@@ -271,8 +271,24 @@ def render_orchestration():
     )
     _tool_explanation(
         "GitHub Actions",
-        "A continuous-integration service that automatically runs checks when code changes.",
-        "On pushes and pull requests, it runs pytest and verifies that the application Docker images can be built.",
+        "A continuous-integration service that automatically tests code and publishes deployable container images.",
+        "On pull requests it runs pytest and verifies all four application images. After a successful push to `main`, it publishes immutable commit-tagged images and `latest` tags to GitHub Container Registry (GHCR).",
+    )
+
+    st.markdown("### What is stored where?")
+    st.caption("Each artifact type has a separate remote store; Docker images and model files are not committed to Git.")
+    st.markdown(
+        "| Artifact | Destination | Purpose |\n"
+        "|---|---|---|\n"
+        "| Source code and configuration | **GitHub repository** | Git versions Python, YAML, Dockerfiles and documentation. |\n"
+        "| Docker images | **GitHub Container Registry (GHCR)** | CI publishes the API, Streamlit, Airflow and trainer images under `ghcr.io/suozdemir/`. |\n"
+        "| Datasets and model checkpoints | **DVC remote on MinIO/S3** | DVC versions large files by content hash without adding them to Git. |\n"
+        "| MLflow run and Registry artifacts | **MinIO** | MLflow stores checkpoints, plots and deployable model bundles in `mlflow-artifacts`. |"
+    )
+    st.info(
+        "In short: `git push` sends code to GitHub, the CI workflow sends container images "
+        "to GHCR, `dvc push` sends versioned data/models to the DVC bucket, and MLflow "
+        "writes experiment artifacts to its MinIO bucket."
     )
 
     st.markdown("### Airflow DAGs")
@@ -291,7 +307,8 @@ def render_orchestration():
     st.write(
         "`docker-compose.yaml` runs the serving stack (MLflow, API, Streamlit, Prometheus, Grafana); "
         "the Airflow stack is a separate compose project with its own network. "
-        "`.github/workflows/ci.yml` runs the test suite and builds all three application images on every push/PR."
+        "`.github/workflows/ci.yml` runs the test suite and builds all four application images on every push/PR; "
+        "a successful `main` push publishes them to GHCR."
     )
 
 

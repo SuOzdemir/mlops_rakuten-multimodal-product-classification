@@ -1,14 +1,23 @@
-name: CI
+name: CI/CD
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -16,16 +25,24 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Run tests
         run: uv run pytest tests/ -v
 
   docker-build:
+    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: api
@@ -37,12 +54,41 @@ jobs:
           - name: airflow
             context: airflow_dst
             dockerfile: airflow_dst/Dockerfile
+          - name: trainer
+            context: .
+            dockerfile: trainer/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build ${{ matrix.name }} image
+      - name: Set lowercase image name
+        id: image
+        shell: bash
+        run: echo "image_name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/rakuten-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.image_name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+
+      - name: Build and optionally push ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          push: false
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

@@ -14,7 +14,7 @@ Multimodal (text + image) product category classification for the Rakuten France
 | Val Macro F1 — ConvNeXt-Base (image) | Model quality | **0.692** |
 | Val Macro F1 — Late fusion (α=0.45) | Model quality | **~0.893** |
 | Public leaderboard rank | Business | Top 5 ([challengedata.ens.fr](https://challengedata.ens.fr/participants/challenges/35/ranking/public)) |
-| API test coverage | Engineering | 45 unit tests, gated in CI on every push/PR |
+| API test coverage | Engineering | 50 unit tests, gated in CI on every push/PR |
 | Serving latency / uptime | Ops | Prometheus + Grafana (`Rakuten API Overview` dashboard) |
 | Prediction drift | Ops | PSI-based tracker, alerted via Grafana → Slack when it crosses 0.25 for 2 minutes |
 
@@ -286,80 +286,305 @@ Not covered yet: input-feature drift, live model-performance decay against real 
 
 ---
 
-## Quick Start
+## Step-by-step setup
 
-### Prerequisites
-- Docker + Docker Compose
-- Model weights in `data/rakuten_streamlit_predictor/` (run Airflow DAG after training)
+### 1. Prerequisites
 
-### Run
+Install the following tools before cloning the project:
 
-```bash
-docker compose up --build
-# or: make up
-```
+- Git
+- Docker Desktop (or Docker Engine + Compose v2)
+- Python 3.12
+- [`uv`](https://docs.astral.sh/uv/) for the local Python environment
+- Kaggle credentials only if the raw dataset will be downloaded
 
-The `make up`, `make up-all`, `make airflow-up`, `make serve`, and
-`make manual-up` commands first run `make docker-up`. On macOS this starts
-Docker Desktop automatically when it is closed and waits for the Docker
-daemon to become ready.
+The API can start without model weights, but `/predict` returns `503` until a complete
+serving bundle exists under `data/rakuten_streamlit_predictor/`.
 
-Airflow (separate stack, own network — used for model promotion after training):
+### 2. Clone and configure
 
 ```bash
-cd airflow_dst && docker compose up --build
-# or from repo root: make airflow-up
+git clone git@github.com:SuOzdemir/mlops_rakuten-multimodal-product-classification.git
+cd mlops_rakuten-multimodal-product-classification
+cp .env.example .env
+make install
 ```
 
-| Service | URL |
-|---------|-----|
-| Streamlit app | http://localhost:8501 |
+Edit `.env` only on the machine that runs the stack. It is gitignored and must never be
+committed. SMTP and Slack values are optional; the stack starts without them.
+
+### 3. Download the dataset (optional for API unit tests)
+
+Put the Kaggle token at `~/.kaggle/kaggle.json`, then run:
+
+```bash
+make setup-data
+make prepare-splits
+```
+
+`setup-data` downloads the raw CSV and image files into `data/raw/`.
+`prepare-splits` executes the DVC `prepare_splits` stage and creates the shared image/text
+train-validation split under `outputs/image_modeling/`.
+
+### 4. Start the serving stack
+
+```bash
+make up
+```
+
+This starts Postgres, Adminer, MinIO, MLflow, API, Streamlit, Prometheus and Grafana.
+Compose waits for dependency health checks, so API and Streamlit do not race Postgres.
+On macOS, the Makefile starts Docker Desktop first if necessary and waits up to two minutes.
+
+To include the separate Airflow stack:
+
+```bash
+make up-all
+```
+
+Airflow is intentionally a second Compose project. It reaches the main Postgres and MLflow
+services through `host.docker.internal` and launches training containers through the scoped
+Docker socket proxy.
+
+### 5. Verify the services
+
+```bash
+make health
+docker compose ps
+cd airflow_dst && docker compose ps
+```
+
+| Service | URL / credentials |
+|---------|-------------------|
+| Streamlit | http://localhost:8501 |
 | FastAPI | http://localhost:8000 |
-| API docs | http://localhost:8000/docs |
-| MLflow UI | http://localhost:5001 |
-| Airflow UI | http://localhost:8080 |
+| OpenAPI docs | http://localhost:8000/docs |
+| MLflow | http://localhost:5001 |
+| Airflow | http://localhost:8080 (`admin` / `adminadmin`) |
+| Adminer | http://localhost:8081 |
+| MinIO console | http://localhost:9001 (`admin` / `adminadmin`) |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (admin/adminadmin) |
+| Grafana | http://localhost:3000 (`admin` / `adminadmin`) |
 
-Check all serving-stack services are healthy: `make health`
-
-### Credentials
-
-Users are stored in the shared Postgres instance (`api` database, `DATABASE_URL` in `docker-compose.yaml` — same Postgres server as MLflow/Airflow, one database server instead of separate SQLite files per service), created and seeded automatically on first API startup. Passwords are salted + hashed (PBKDF2-HMAC-SHA256, 100k iterations), never stored in plain text.
+Application users are seeded by the API on first startup. Passwords are stored as salted
+PBKDF2-HMAC-SHA256 hashes in the `api` database.
 
 | Username | Password | Role |
 |----------|----------|------|
 | `admin` | `adminadmin` | `admin` |
 | `user` | `user` | `viewer` |
 
-The `role` field is stored per-user but not yet enforced on any endpoint — every authenticated user currently has the same access (no admin-only routes exist yet).
+The admin role may trigger `/retrain`; viewer accounts may inspect retrain jobs but cannot
+start one. These credentials are local-development defaults and must be replaced before a
+public deployment.
 
-### DVC remote (MinIO)
+## Database initialization
 
-`dvc push`/`dvc pull` share DVC-tracked data/models via the local MinIO instance (`s3://dvc-data`, same MinIO MLflow's artifacts use — started by `make up`). The remote's URL/endpoint (`.dvc/config`) is committed, but credentials are per-machine and gitignored (`.dvc/config.local`) — run this once after cloning:
+The root Compose stack runs one PostgreSQL 15 server and separates service data into three
+databases:
+
+| Database | Owner | Used by |
+|----------|-------|---------|
+| `mlflow` | `mlflow` | MLflow runs and Model Registry metadata |
+| `airflow` | `airflow` | Airflow metadata, DAG runs and task state |
+| `api` | `api` | API users and authentication state |
+
+On the **first** Postgres start, Docker mounts
+`scripts/postgres_init/create_databases.sql` into `/docker-entrypoint-initdb.d/`. The official
+Postgres entrypoint executes it and creates all three users and databases. The API creates
+its own tables and seed users afterward; `airflow-init` runs migrations and creates the
+Airflow admin account.
+
+The SQL init directory is processed only when `postgres_data` is empty. Editing the SQL file
+does not modify an existing database. Inspect the result with Adminer, or from the terminal:
 
 ```bash
-dvc remote modify --local minio access_key_id admin
-dvc remote modify --local minio secret_access_key adminadmin
+docker compose exec postgres psql -U postgres -c '\\l'
+docker compose exec postgres psql -U postgres -c '\\du'
 ```
 
-### Run tests
+For a normal restart, preserve the database:
 
 ```bash
-# Install dev dependencies
-uv sync
-# or: make install
-
-# Run API unit tests (no Docker, no model weights needed)
-python -m pytest tests/ -v
-# or: make test
+make down
+make up
 ```
 
-### CI
+To intentionally rebuild all local Postgres data, remove only its named volume. This deletes
+MLflow history, Airflow metadata and API users and cannot be undone:
 
-Every push/PR to `main` runs via GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
-- `test` — `uv sync` + `pytest tests/` (45 tests, mocked model assets — no GPU/weights needed)
-- `docker-build` — builds the `api`, `streamlit`, and `airflow` images to catch Dockerfile breakage before merge (does not push)
+```bash
+make down-all
+docker volume ls | grep postgres_data
+# Confirm the exact name shown above, then:
+docker volume rm <compose-project>_postgres_data
+make up-all
+```
+
+Do not use `docker compose down -v` casually: it also removes MinIO, Prometheus and Grafana
+volumes.
+
+## MinIO, MLflow and DVC storage
+
+`minio-init` is a one-shot Compose service. Once MinIO is healthy, it idempotently creates:
+
+- `mlflow-artifacts` for MLflow model/run artifacts;
+- `dvc-data` for DVC-tracked datasets and model outputs.
+
+The committed `.dvc/config` points at the local `dvc-data` bucket. Credentials belong in the
+gitignored `.dvc/config.local`; configure them once per machine:
+
+```bash
+uv run dvc remote modify --local minio access_key_id admin
+uv run dvc remote modify --local minio secret_access_key adminadmin
+uv run dvc pull   # download DVC-tracked files
+uv run dvc push   # upload new DVC-tracked files
+```
+
+This MinIO instance is a local-development remote, not a team-wide or production backup.
+For multiple machines, point DVC at a reachable S3/MinIO bucket and store its credentials in
+CI secrets or the host secret manager.
+
+## Makefile command reference
+
+Run these commands from the repository root:
+
+| Command | What it does |
+|---------|--------------|
+| `make install` | Creates/synchronizes the Python 3.12 environment from `uv.lock`. |
+| `make setup-data` | Downloads the Kaggle dataset into `data/raw/`. |
+| `make prepare-splits` | Runs `dvc repro prepare_splits`. |
+| `make docker-up` | Verifies Docker; on macOS starts Docker Desktop and waits for it. |
+| `make up` | Builds and starts the complete always-on serving/monitoring stack. |
+| `make serve` | Starts only API and Streamlit (plus required dependencies), without MLflow. |
+| `make airflow-up` | Builds and starts the separate Airflow stack. Start the root stack first. |
+| `make up-all` | Runs `make up`, then `make airflow-up`. |
+| `make down` | Stops the root Compose stack without deleting named volumes. |
+| `make airflow-down` | Stops the Airflow stack. |
+| `make down-all` | Stops both Compose stacks and preserves data volumes. |
+| `make restart-all` | Stops and starts both stacks. |
+| `make logs` | Follows root-stack container logs. |
+| `make airflow-logs` | Follows Airflow logs. |
+| `make health` | Checks MLflow, API and Streamlit health endpoints. |
+| `make test` | Runs the complete pytest suite through `uv`. |
+| `make manual-up` | Runs MLflow, API and Streamlit as local processes; Postgres still uses Docker. |
+| `make manual-down` | Stops processes created by `manual-up`. |
+| `make manual-up-all` | Starts manual serving processes plus Dockerized Airflow. |
+| `make manual-down-all` | Stops manual serving processes and Airflow. |
+
+`manual-up` and `make up` use the same host ports and deliberately refuse to run together.
+Use Docker mode for the reproducible full stack; use manual mode while debugging Python code.
+
+## Tests
+
+```bash
+make install
+make test
+# More detailed output:
+uv run pytest tests/ -v
+```
+
+The suite currently contains **50 tests** across four files:
+
+| File | Coverage |
+|------|----------|
+| `tests/test_api.py` | Health, login/logout, prediction, auth and retrain endpoints |
+| `tests/test_drift.py` | Reference distribution, PSI thresholds and rolling window |
+| `tests/test_predictor_architecture.py` | ConvNeXt serving/training head compatibility |
+| `tests/test_retrain.py` | Airflow client mapping, conflicts and retrain state |
+
+Tests mock external model assets and Airflow calls; they need neither GPU, production weights,
+nor a running Docker stack.
+
+## GitHub Actions: CI and image publishing
+
+The workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+### What is stored where?
+
+| Artifact | Destination | How it gets there |
+|----------|-------------|-------------------|
+| Git source code and configuration | **GitHub repository** | `git push origin <branch>` |
+| Docker images | **GitHub Container Registry (GHCR)** | GitHub Actions publishes them after a successful `main` push |
+| Datasets and model checkpoints | **DVC remote on MinIO/S3** | `uv run dvc push` |
+| MLflow run and Model Registry artifacts | **MinIO** | MLflow writes them to the `mlflow-artifacts` bucket |
+
+In short: GitHub stores the code, GHCR stores deployable containers, DVC/MinIO/S3
+stores large versioned data and model files, and MLflow uses MinIO for experiment and
+Registry artifacts. These files must not be mixed together or committed to Git.
+
+### Pull request flow
+
+1. Create a feature branch and push it to the GitHub `origin` remote.
+2. Open a pull request targeting `main`.
+3. GitHub Actions installs the locked dependencies and runs all 50 tests.
+4. Only after tests pass, it builds `api`, `streamlit`, `airflow` and `trainer` images.
+5. PR builds do **not** push images to a registry.
+6. Require this workflow in the `main` branch protection rules before merging.
+
+```bash
+git checkout -b feature/my-change
+git add .
+git commit -m "Describe the change"
+git push -u origin feature/my-change
+```
+
+### Main branch publish flow
+
+After the pull request is merged, the `push` event on `main` repeats tests and builds. If all
+checks pass, the workflow authenticates to GitHub Container Registry (GHCR) with the automatic
+`GITHUB_TOKEN` and publishes four packages:
+
+```text
+ghcr.io/suozdemir/rakuten-api:latest
+ghcr.io/suozdemir/rakuten-streamlit:latest
+ghcr.io/suozdemir/rakuten-airflow:latest
+ghcr.io/suozdemir/rakuten-trainer:latest
+```
+
+Every image also receives an immutable `sha-<commit>` tag. Deploy the SHA tag for reproducible
+releases; use `latest` only for a convenient development environment. GHCR creates each package
+automatically on its first successful push—there is no empty registry repository to create by
+hand. The job has only `contents: read` and `packages: write` permissions.
+
+In GitHub, open the repository **Actions** tab to approve/run the workflow and the profile or
+organization **Packages** page to see the images. Set package visibility to public if anonymous
+pulls are desired; otherwise keep it private and authenticate deployment machines.
+
+### Which remote receives what?
+
+- Source code goes to the existing Git remote: `git push origin <branch>` → GitHub repository.
+- Docker images go to GHCR: `docker push ghcr.io/suozdemir/rakuten-<service>:<tag>`.
+- DVC data/model files go to the configured DVC/S3 remote: `uv run dvc push`.
+- MLflow artifacts go to MinIO through the MLflow server; they do not belong in Git or GHCR.
+
+These stores solve different problems. Never place datasets, model checkpoints or `.env` secrets
+inside the Git repository or application images.
+
+### Pulling images on a remote server
+
+The deployment destination should be a controlled Linux host (for example an AWS EC2, GCP VM,
+Azure VM or another VPS) with Docker Compose installed. For private packages, create a GitHub
+fine-grained/classic token with at least `read:packages`, store it in the server's secret manager,
+and log in once:
+
+```bash
+export CR_PAT='<token-with-read-packages>'
+echo "$CR_PAT" | docker login ghcr.io -u SuOzdemir --password-stdin
+docker pull ghcr.io/suozdemir/rakuten-api:sha-<commit>
+docker pull ghcr.io/suozdemir/rakuten-streamlit:sha-<commit>
+```
+
+The current `docker-compose.yaml` is optimized for local development and contains `build:`
+definitions. A production deployment should use a separate Compose override (or Kubernetes
+manifests) whose `image:` values reference the immutable GHCR tags. Keep Postgres/MinIO data in
+persistent managed storage, provide secrets outside Git, and make the model bundle available via
+DVC/object storage before starting the API. Publishing an image is not itself a deployment; the
+remote host still needs an explicit pull/restart step.
+
+The repository currently publishes images but intentionally does not SSH into a server. Add that
+deployment job only after the target host, domain/TLS strategy, secret manager and rollback policy
+have been chosen.
 
 ---
 
