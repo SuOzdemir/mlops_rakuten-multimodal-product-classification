@@ -9,8 +9,11 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in .env}
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD:?Set MLFLOW_DB_PASSWORD in .env}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in .env}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/postgres_init/create_databases.sql:/docker-entrypoint-initdb.d/create_databases.sql:ro
@@ -44,8 +47,8 @@ services:
     volumes:
       - minio_data:/data
     environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=adminadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -61,9 +64,12 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 admin adminadmin &&
+      mc alias set local http://minio:9000 \"$${MINIO_ROOT_USER}\" \"$${MINIO_ROOT_PASSWORD}\" &&
       mc mb -p local/mlflow-artifacts &&
       mc mb -p local/dvc-data &&
       echo 'buckets ready'
@@ -95,13 +101,13 @@ services:
       # itself, so only mlflow needs these MinIO credentials -- clients
       # (trainer, api, notebooks) never see them, they just talk to mlflow.
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: admin
-      AWS_SECRET_ACCESS_KEY: adminadmin
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
     command: >
       mlflow server
       --host 0.0.0.0
       --port 5001
-      --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
+      --backend-store-uri postgresql://mlflow:${MLFLOW_DB_PASSWORD:?Set MLFLOW_DB_PASSWORD in .env}@postgres:5432/mlflow
       --artifacts-destination s3://mlflow-artifacts/
       --serve-artifacts
     depends_on:
@@ -149,6 +155,27 @@ services:
       mlflow:
         condition: service_healthy
 
+  # Ephemeral candidate packaging, DVC push, Registry gate, and deployment.
+  # Airflow launches this image with DockerOperator; it is not always on.
+  promotion:
+    build:
+      context: .
+      dockerfile: promotion/Dockerfile
+    profiles: ["promotion"]
+    volumes:
+      - .:/project
+    environment:
+      - MODEL=${MODEL:-text}
+      - MLFLOW_TRACKING_URI=http://mlflow:5001
+      - DVC_ENDPOINT_URL=http://minio:9000
+      - PROMOTION_MIN_F1_GAIN=${PROMOTION_MIN_F1_GAIN:-0}
+      - PROMOTION_ALLOW_UNTAGGED_CHAMPION=${PROMOTION_ALLOW_UNTAGGED_CHAMPION:-false}
+    mem_limit: 8g
+    shm_size: "2gb"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -161,11 +188,13 @@ services:
       # Auth users table, same shared postgres instance as mlflow/airflow
       # (db "api", created by scripts/postgres_init/create_databases.sql) —
       # replaces the old config/users.db SQLite file.
-      - DATABASE_URL=postgresql://api:api@postgres:5432/api
+      - DATABASE_URL=postgresql://api:${API_DB_PASSWORD:?Set API_DB_PASSWORD in .env}@postgres:5432/api
       # Airflow lives in the separate airflow_dst compose stack (own network).
       - AIRFLOW_API_URL=${AIRFLOW_API_URL:-http://host.docker.internal:8080}
-      - AIRFLOW_API_USER=${AIRFLOW_API_USER:-admin}
-      - AIRFLOW_API_PASSWORD=${AIRFLOW_API_PASSWORD:-adminadmin}
+      - AIRFLOW_API_USER=${AIRFLOW_API_USER:?Set AIRFLOW_API_USER in .env}
+      - AIRFLOW_API_PASSWORD=${AIRFLOW_API_PASSWORD:?Set AIRFLOW_API_PASSWORD in .env}
+      - API_ADMIN_PASSWORD=${API_ADMIN_PASSWORD:?Set API_ADMIN_PASSWORD in .env}
+      - API_VIEWER_PASSWORD=${API_VIEWER_PASSWORD:?Set API_VIEWER_PASSWORD in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -197,7 +226,8 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=adminadmin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER in .env}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
       # SMTP settings used by Grafana's provisioned email contact point.
       # Put credentials only in the local, gitignored .env file.
       - GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
@@ -225,8 +255,8 @@ services:
     environment:
       - API_URL=http://api:8000
       - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=admin
-      - MINIO_SECRET_KEY=adminadmin
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
       - MINIO_SECURE=false
     depends_on:
       api:

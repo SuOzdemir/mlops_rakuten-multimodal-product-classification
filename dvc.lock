@@ -76,12 +76,12 @@ stages:
       size: 1994
     - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/train.py
       hash: md5
-      md5: b14202ee4c221ead4d2bf2a11bbf594a
-      size: 14407
+      md5: 26ef544bfe4707cf1aa62f34eeb7e2e2
+      size: 14706
     - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/utils.py
       hash: md5
-      md5: a6880dce8a3d2f0f7e2709ecf33e7987
-      size: 15012
+      md5: b0948b4f36c47992aaa29fe983691ce3
+      size: 15752
     - path: outputs/image_modeling/label2id.json
       hash: md5
       md5: 2c4ee652148136abed6e670fa20052bb
@@ -98,5 +98,5 @@ stages:
     - path: 
         models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/best_model_text.pt
       hash: md5
-      md5: 31f04f0af3a9d4b182ce0c2cc0815223
+      md5: 2934af774576eff3705626ce5065a44d
       size: 442652965

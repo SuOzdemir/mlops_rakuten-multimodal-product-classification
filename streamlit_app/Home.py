@@ -18,6 +18,7 @@ from project_story import (
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 MLFLOW_PUBLIC_URL = os.environ.get("MLFLOW_PUBLIC_URL", "http://localhost:5001")
+AIRFLOW_PUBLIC_URL = os.environ.get("AIRFLOW_PUBLIC_URL", "http://localhost:8080")
 
 st.set_page_config(
     page_title="Rakuten Product Classifier",
@@ -130,18 +131,6 @@ def api_retrain_status(token: str, job_id: str) -> dict | None:
         return resp.json() if resp.status_code == 200 else None
     except requests.exceptions.ConnectionError:
         return None
-
-
-def api_retrain_list(token: str) -> list[dict]:
-    try:
-        resp = requests.get(
-            f"{API_URL}/retrain",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        return resp.json() if resp.status_code == 200 else []
-    except requests.exceptions.ConnectionError:
-        return []
 
 
 # -------------------------------------------------------------------
@@ -445,6 +434,7 @@ def render_retrain():
         "Artifacts → training_curves.png for the generated summary image."
     )
     st.link_button("Open MLflow results", MLFLOW_PUBLIC_URL)
+    st.link_button("View all retrain jobs in Airflow", AIRFLOW_PUBLIC_URL)
 
     if "retrain_job_id" not in st.session_state:
         st.session_state.retrain_job_id = None
@@ -484,16 +474,6 @@ def render_retrain():
             st.markdown(f"**Status:** {emoji} {job['status']}  |  **Model:** {job['model']}  |  **Epochs:** {job.get('epochs', '-')}  |  **Started:** {job.get('started_at') or '-'}")
         else:
             st.warning("Could not fetch job status (Airflow unreachable or job not found).")
-
-    st.divider()
-    st.markdown("### All retrain jobs")
-    jobs = api_retrain_list(st.session_state["token"])
-    if not jobs:
-        st.info("No retrain jobs yet, or Airflow is unreachable.")
-    else:
-        for job in jobs:
-            emoji = STATUS_COLOR.get(job["status"], "⚪")
-            st.write(f"{emoji} `{job['job_id']}` — model: **{job['model']}** — epochs: **{job.get('epochs', '-')}** — status: **{job['status']}** — started: {job.get('started_at') or '-'}")
 
     if auto_refresh:
         import time

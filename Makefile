@@ -77,13 +77,14 @@ health:
 
 # Training/promotion stack: separate compose project, own network
 airflow-up: docker-up
-	cd airflow_dst && docker compose up --build -d
+	docker compose --profile promotion build promotion
+	cd airflow_dst && docker compose --env-file ../.env up --build -d
 
 airflow-down:
-	cd airflow_dst && docker compose down
+	cd airflow_dst && docker compose --env-file ../.env down
 
 airflow-logs:
-	cd airflow_dst && docker compose logs -f
+	cd airflow_dst && docker compose --env-file ../.env logs -f
 
 test:
 	uv run pytest
@@ -103,8 +104,8 @@ manual-up: docker-up
 	# the same ./mlruns/artifacts dir as the Docker mlflow -- one shared run
 	# history regardless of which mode started it, instead of a second,
 	# disconnected SQLite-backed mlflow.
-	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri postgresql://mlflow:mlflow@localhost:5432/mlflow --artifacts-destination ./mlruns/artifacts --serve-artifacts > mlflow.log 2>&1 &
-	MLFLOW_TRACKING_URI=http://localhost:5001 AIRFLOW_API_URL=http://localhost:8080 DATABASE_URL=postgresql://api:api@localhost:5432/api uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
+	set -a; . ./.env; set +a; PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri postgresql://mlflow:$$MLFLOW_DB_PASSWORD@localhost:5432/mlflow --artifacts-destination ./mlruns/artifacts --serve-artifacts > mlflow.log 2>&1 &
+	set -a; . ./.env; set +a; MLFLOW_TRACKING_URI=http://localhost:5001 AIRFLOW_API_URL=http://localhost:8080 DATABASE_URL=postgresql://api:$$API_DB_PASSWORD@localhost:5432/api uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
 	API_URL=http://localhost:8000 uv run streamlit run streamlit_app/Home.py --server.port 8501 > streamlit.log 2>&1 &
 
 # Kills the background processes started by manual-up (matched by command line)

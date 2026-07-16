@@ -8,6 +8,13 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [ -f "$PROJECT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$PROJECT_DIR/.env"
+  set +a
+fi
+
 echo "============================================================"
 echo "1. Docker's own accounting (images, containers, volumes, build cache)"
 echo "============================================================"
@@ -47,9 +54,12 @@ echo "4. MinIO bucket contents (if minio is running) -- artifacts now live"
 echo "   here, not on any single container's own disk"
 echo "============================================================"
 if docker ps --format '{{.Names}}' | grep -q '^mlops-rakuten-product-classification-minio-1$'; then
+  : "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}"
+  : "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}"
   docker run --rm --network mlops-rakuten-product-classification_default \
+    -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
     --entrypoint sh minio/mc -c "
-      mc alias set local http://minio:9000 admin adminadmin >/dev/null 2>&1
+      mc alias set local http://minio:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null 2>&1
       echo '  mlflow-artifacts bucket:'
       mc du local/mlflow-artifacts 2>/dev/null | sed 's/^/    /' || echo '    (empty or unreachable)'
       echo '  dvc-data bucket:'

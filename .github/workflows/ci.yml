@@ -57,6 +57,9 @@ jobs:
           - name: trainer
             context: .
             dockerfile: trainer/Dockerfile
+          - name: promotion
+            context: .
+            dockerfile: promotion/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

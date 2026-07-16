@@ -14,7 +14,7 @@ Multimodal (text + image) product category classification for the Rakuten France
 | Val Macro F1 — ConvNeXt-Base (image) | Model quality | **0.692** |
 | Val Macro F1 — Late fusion (α=0.45) | Model quality | **~0.893** |
 | Public leaderboard rank | Business | Top 5 ([challengedata.ens.fr](https://challengedata.ens.fr/participants/challenges/35/ranking/public)) |
-| API test coverage | Engineering | 50 unit tests, gated in CI on every push/PR |
+| API test coverage | Engineering | 55 unit tests, gated in CI on every push/PR |
 | Serving latency / uptime | Ops | Prometheus + Grafana (`Rakuten API Overview` dashboard) |
 | Prediction drift | Ops | PSI-based tracker, alerted via Grafana → Slack when it crosses 0.25 for 2 minutes |
 
@@ -121,10 +121,13 @@ separate `airflow_dst` compose stack), so there's one database server instead of
 
 ### Model Registry and deployment (Airflow DAG)
 
-After training, `rakuten_model_promotion` assembles a complete, loadable
-multimodal serving bundle and logs it as an MLflow `pyfunc` model named
-`rakuten-multimodal-classifier`. The new version receives the `champion`
-alias. The DAG then downloads `models:/rakuten-multimodal-classifier@champion`
+After training, `rakuten_model_promotion` launches a temporary promotion
+container rather than loading models in the Airflow scheduler. It pushes the
+retrained checkpoint to the DVC remote, assembles a complete multimodal serving
+bundle and logs it as an MLflow `pyfunc` candidate named
+`rakuten-multimodal-classifier`. The candidate receives the `champion` alias only
+when its retrained component's validation Macro-F1 passes the configured gate.
+The container then downloads `models:/rakuten-multimodal-classifier@champion`
 back from MLflow and atomically replaces `data/rakuten_streamlit_predictor/`.
 
 The registered model and the API therefore use the same image weights,
@@ -235,6 +238,12 @@ Not covered yet: input-feature drift, live model-performance decay against real 
 ├── trainer/                          # Ephemeral training container (launched by the training DAG)
 │   ├── Dockerfile                    # CPU-only torch + mlflow/dvc deps
 │   ├── entrypoint.sh                 # dvc repro prepare_splits && dvc repro train_$MODEL --force
+│   └── requirements.txt
+│
+├── promotion/                        # Ephemeral DVC push + MLflow candidate gate/deployment
+│   ├── Dockerfile
+│   ├── entrypoint.sh
+│   ├── promote.py
 │   └── requirements.txt
 │
 ├── scripts/
@@ -360,19 +369,19 @@ cd airflow_dst && docker compose ps
 | FastAPI | http://localhost:8000 |
 | OpenAPI docs | http://localhost:8000/docs |
 | MLflow | http://localhost:5001 |
-| Airflow | http://localhost:8080 (`admin` / `adminadmin`) |
+| Airflow | http://localhost:8080 (`AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD`) |
 | Adminer | http://localhost:8081 |
-| MinIO console | http://localhost:9001 (`admin` / `adminadmin`) |
+| MinIO console | http://localhost:9001 (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (`admin` / `adminadmin`) |
+| Grafana | http://localhost:3000 (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`) |
 
 Application users are seeded by the API on first startup. Passwords are stored as salted
 PBKDF2-HMAC-SHA256 hashes in the `api` database.
 
 | Username | Password | Role |
 |----------|----------|------|
-| `admin` | `adminadmin` | `admin` |
-| `user` | `user` | `viewer` |
+| `admin` | Value of `API_ADMIN_PASSWORD` | `admin` |
+| `user` | Value of `API_VIEWER_PASSWORD` | `viewer` |
 
 The admin role may trigger `/retrain`; viewer accounts may inspect retrain jobs but cannot
 start one. These credentials are local-development defaults and must be replaced before a
@@ -395,8 +404,11 @@ Postgres entrypoint executes it and creates all three users and databases. The A
 its own tables and seed users afterward; `airflow-init` runs migrations and creates the
 Airflow admin account.
 
-The SQL init directory is processed only when `postgres_data` is empty. Editing the SQL file
-does not modify an existing database. Inspect the result with Adminer, or from the terminal:
+Database passwords are read from the local `.env`; no database password is stored in Compose or
+the SQL file. The SQL init directory is processed only when `postgres_data` is empty. Editing the
+SQL file or `.env` does not rotate passwords in an existing database. After changing database
+passwords, either rotate each PostgreSQL role explicitly or intentionally recreate the development
+volume as described below. Inspect the result with Adminer, or from the terminal:
 
 ```bash
 docker compose exec postgres psql -U postgres -c '\\l'
@@ -435,8 +447,8 @@ The committed `.dvc/config` points at the local `dvc-data` bucket. Credentials b
 gitignored `.dvc/config.local`; configure them once per machine:
 
 ```bash
-uv run dvc remote modify --local minio access_key_id admin
-uv run dvc remote modify --local minio secret_access_key adminadmin
+uv run dvc remote modify --local minio access_key_id "$MINIO_ROOT_USER"
+uv run dvc remote modify --local minio secret_access_key "$MINIO_ROOT_PASSWORD"
 uv run dvc pull   # download DVC-tracked files
 uv run dvc push   # upload new DVC-tracked files
 ```
@@ -444,6 +456,29 @@ uv run dvc push   # upload new DVC-tracked files
 This MinIO instance is a local-development remote, not a team-wide or production backup.
 For multiple machines, point DVC at a reachable S3/MinIO bucket and store its credentials in
 CI secrets or the host secret manager.
+
+## Secrets and passwords
+
+All Postgres, MinIO, Grafana, Airflow and initial API-user credentials are required through the
+gitignored root `.env`. Start from the committed variable-name template:
+
+```bash
+cp .env.example .env
+openssl rand -hex 32   # run separately for every password variable
+```
+
+Replace every `replace-with-...` value; never reuse one password across services. The Compose
+configuration fails immediately with a clear message when a required variable is absent. The
+separate Airflow Compose project must be invoked through the Makefile, or explicitly with the same
+root env file:
+
+```bash
+cd airflow_dst
+docker compose --env-file ../.env up --build -d
+```
+
+`.env` is appropriate for local development. In production, inject the same variables from the
+cloud/platform secret manager instead of copying a plaintext `.env` onto the server.
 
 ## Makefile command reference
 
@@ -484,7 +519,7 @@ make test
 uv run pytest tests/ -v
 ```
 
-The suite currently contains **50 tests** across four files:
+The suite currently contains **55 tests** across five files:
 
 | File | Coverage |
 |------|----------|
@@ -492,6 +527,7 @@ The suite currently contains **50 tests** across four files:
 | `tests/test_drift.py` | Reference distribution, PSI thresholds and rolling window |
 | `tests/test_predictor_architecture.py` | ConvNeXt serving/training head compatibility |
 | `tests/test_retrain.py` | Airflow client mapping, conflicts and retrain state |
+| `tests/test_promotion.py` | Candidate metric parsing, bootstrap and champion promotion gates |
 
 Tests mock external model assets and Airflow calls; they need neither GPU, production weights,
 nor a running Docker stack.
@@ -517,8 +553,8 @@ Registry artifacts. These files must not be mixed together or committed to Git.
 
 1. Create a feature branch and push it to the GitHub `origin` remote.
 2. Open a pull request targeting `main`.
-3. GitHub Actions installs the locked dependencies and runs all 50 tests.
-4. Only after tests pass, it builds `api`, `streamlit`, `airflow` and `trainer` images.
+3. GitHub Actions installs the locked dependencies and runs all 55 tests.
+4. Only after tests pass, it builds `api`, `streamlit`, `airflow`, `trainer` and `promotion` images.
 5. PR builds do **not** push images to a registry.
 6. Require this workflow in the `main` branch protection rules before merging.
 
@@ -533,13 +569,14 @@ git push -u origin feature/my-change
 
 After the pull request is merged, the `push` event on `main` repeats tests and builds. If all
 checks pass, the workflow authenticates to GitHub Container Registry (GHCR) with the automatic
-`GITHUB_TOKEN` and publishes four packages:
+`GITHUB_TOKEN` and publishes five packages:
 
 ```text
 ghcr.io/suozdemir/rakuten-api:latest
 ghcr.io/suozdemir/rakuten-streamlit:latest
 ghcr.io/suozdemir/rakuten-airflow:latest
 ghcr.io/suozdemir/rakuten-trainer:latest
+ghcr.io/suozdemir/rakuten-promotion:latest
 ```
 
 Every image also receives an immutable `sha-<commit>` tag. Deploy the SHA tag for reproducible

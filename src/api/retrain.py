@@ -8,7 +8,7 @@ DAG_ID = "rakuten_model_training"
 
 AIRFLOW_API_URL = os.environ.get("AIRFLOW_API_URL", "http://host.docker.internal:8080")
 AIRFLOW_API_USER = os.environ.get("AIRFLOW_API_USER", "admin")
-AIRFLOW_API_PASSWORD = os.environ.get("AIRFLOW_API_PASSWORD", "adminadmin")
+AIRFLOW_API_PASSWORD = os.environ.get("AIRFLOW_API_PASSWORD")
 _AUTH = (AIRFLOW_API_USER, AIRFLOW_API_PASSWORD)
 _TIMEOUT = 10
 

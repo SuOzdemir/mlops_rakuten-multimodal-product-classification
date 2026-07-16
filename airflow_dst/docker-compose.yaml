@@ -8,7 +8,7 @@ x-airflow-common: &airflow-common
     # Shared Postgres lives in the main docker-compose.yaml stack (own network) —
     # reached via host.docker.internal, same pattern as AIRFLOW_API_URL/MLFLOW_TRACKING_URI
     # below. Run `make up` (or at least `docker compose up -d postgres`) before this stack.
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@host.docker.internal:5432/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in ../.env}@host.docker.internal:5432/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     # Airflow pauses newly-discovered DAGs by default — without this, a fresh
     # stack silently queues /retrain runs forever since the scheduler skips
@@ -26,7 +26,7 @@ x-airflow-common: &airflow-common
     - ./plugins:/opt/airflow/plugins
     - ../:/project:rw    # full project mounted so DAGs can read models/ and write data/
   env_file:
-    - .env
+    - ../.env
   extra_hosts:
     - "host.docker.internal:host-gateway"
 
@@ -52,8 +52,8 @@ services:
     <<: *airflow-common
     command: >
       bash -c "airflow db migrate &&
-      airflow users create --username admin --password adminadmin
-      --firstname Admin --lastname Admin --role Admin --email admin@example.com"
+      airflow users create --username \"$${AIRFLOW_API_USER}\" --password \"$${AIRFLOW_API_PASSWORD}\"
+      --firstname Admin --lastname Admin --role Admin --email \"$${AIRFLOW_ADMIN_EMAIL}\""
     restart: "no"
 
   airflow-webserver:

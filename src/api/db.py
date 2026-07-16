@@ -4,12 +4,12 @@ import secrets
 
 import psycopg2
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://api:api@postgres:5432/api")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Seeded on first run only, so an existing table is never overwritten.
 DEFAULT_USERS = [
-    ("admin", "adminadmin", "admin"),
-    ("user", "user", "viewer"),
+    ("admin", os.environ.get("API_ADMIN_PASSWORD"), "admin"),
+    ("user", os.environ.get("API_VIEWER_PASSWORD"), "viewer"),
 ]
 
 _PBKDF2_ITERATIONS = 100_000
@@ -20,6 +20,8 @@ def _hash_password(password: str, salt: bytes) -> bytes:
 
 
 def _connect():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL must be set.")
     return psycopg2.connect(DATABASE_URL)
 
 
@@ -41,6 +43,8 @@ def init_db() -> None:
             count = cur.fetchone()[0]
             if count == 0:
                 for username, password, role in DEFAULT_USERS:
+                    if not password:
+                        raise RuntimeError(f"Password for seed user '{username}' must be set.")
                     salt = secrets.token_bytes(16)
                     cur.execute(
                         "INSERT INTO users (username, password_hash, salt, role) VALUES (%s, %s, %s, %s)",

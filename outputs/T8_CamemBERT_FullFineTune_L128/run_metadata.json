@@ -1,6 +1,6 @@
 {
   "model_name": "T8_CamemBERT_FullFineTune_L128",
-  "best_macro_f1": 0.810869,
-  "best_epoch": 1,
-  "duration_min": 16.2
+  "best_macro_f1": 0.77828,
+  "best_epoch": 3,
+  "duration_min": 1.44
 }

@@ -162,6 +162,7 @@ def rakuten_model_training():
     trigger_promotion = TriggerDagRunOperator(
         task_id="trigger_promotion",
         trigger_dag_id="rakuten_model_promotion",
+        conf={"model": "{{ params.model }}"},
         wait_for_completion=True,
         poke_interval=10,
     )

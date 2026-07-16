@@ -62,8 +62,8 @@ def _list_minio_objects() -> tuple[list[dict], str | None]:
 
         client = Minio(
             os.environ.get("MINIO_ENDPOINT", "minio:9000"),
-            access_key=os.environ.get("MINIO_ACCESS_KEY", "admin"),
-            secret_key=os.environ.get("MINIO_SECRET_KEY", "adminadmin"),
+            access_key=os.environ.get("MINIO_ACCESS_KEY", ""),
+            secret_key=os.environ.get("MINIO_SECRET_KEY", ""),
             secure=os.environ.get("MINIO_SECURE", "false").lower() == "true",
         )
         rows = []
@@ -205,6 +205,31 @@ def render_tracking():
         "An S3-compatible object-storage service for keeping large artifacts in centralized persistent storage.",
         "We use separate buckets on the same MinIO server for MLflow artifacts and the DVC remote, so model and data files survive container replacement.",
     )
+
+    st.markdown("### DVC paths and artifact destinations")
+    st.caption(
+        "Large files, experiment artifacts, deployable models, and source code have different owners. "
+        "The table shows both the project path and the system responsible for storing each artifact."
+    )
+    st.markdown(
+        "| Content | Project path | Destination | What it is used for |\n"
+        "|---|---|---|---|\n"
+        "| Raw dataset | `data/raw/` | **DVC → `dvc-data`** *(planned; currently downloaded from Kaggle)* | Original CSV and image inputs from which every reproducible pipeline run starts. |\n"
+        "| Train/validation splits | `outputs/image_modeling/train_split.csv`, `val_split.csv`, `label2id.json` | **DVC → `dvc-data`** | Versioned, shared inputs used by both image and text training. |\n"
+        "| Training checkpoints | `models/Model_I12_ConvNeXt_Base_ModerateAug_Full/best_model_state_dict.pt`, `models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/best_model_text.pt` | **DVC → `dvc-data`** | Reproducible model weights tied to the code, data, and `dvc.lock` version that produced them. |\n"
+        "| Experiment plots and metrics | Logged by the training scripts | **MLflow → `mlflow-artifacts`** | Compares runs, parameters, validation metrics, learning curves, and reports. |\n"
+        "| Deployable multimodal bundle | MLflow model `rakuten-multimodal-classifier` | **MLflow Model Registry → `champion`** | Identifies the exact image + text + tokenizer + mappings bundle approved for serving. |\n"
+        "| Active API model bundle | `data/rakuten_streamlit_predictor/` | **Downloaded from Registry `champion`** | Read-only model files loaded by FastAPI for live predictions. |\n"
+        "| Source code and DVC metadata | Python/YAML/Docker files, `dvc.yaml`, `dvc.lock`, `.dvc/config` | **GitHub** | Versions pipeline definitions and hashes, but never stores large data, checkpoints, or secrets. |"
+    )
+    st.info(
+        "DVC does not create readable `raw/`, `splits/`, or `best-model/` folders inside MinIO. "
+        "The workspace paths above are mapped to content hashes in the local `.dvc/cache`, and "
+        "`dvc push` copies those hash-addressed objects to the `s3://dvc-data` remote. "
+        "The production model is selected by MLflow's `champion` alias rather than by manually "
+        "copying a file into a `best-model` folder."
+    )
+
     st.markdown("### Models stored in MinIO")
     st.write(
         "This is a live view of model-related objects stored in MinIO. "
@@ -272,7 +297,7 @@ def render_orchestration():
     _tool_explanation(
         "GitHub Actions",
         "A continuous-integration service that automatically tests code and publishes deployable container images.",
-        "On pull requests it runs pytest and verifies all four application images. After a successful push to `main`, it publishes immutable commit-tagged images and `latest` tags to GitHub Container Registry (GHCR).",
+        "On pull requests it runs pytest and verifies all five application images. After a successful push to `main`, it publishes immutable commit-tagged images and `latest` tags to GitHub Container Registry (GHCR).",
     )
 
     st.markdown("### What is stored where?")
@@ -281,7 +306,7 @@ def render_orchestration():
         "| Artifact | Destination | Purpose |\n"
         "|---|---|---|\n"
         "| Source code and configuration | **GitHub repository** | Git versions Python, YAML, Dockerfiles and documentation. |\n"
-        "| Docker images | **GitHub Container Registry (GHCR)** | CI publishes the API, Streamlit, Airflow and trainer images under `ghcr.io/suozdemir/`. |\n"
+        "| Docker images | **GitHub Container Registry (GHCR)** | CI publishes the API, Streamlit, Airflow, trainer and promotion images under `ghcr.io/suozdemir/`. |\n"
         "| Datasets and model checkpoints | **DVC remote on MinIO/S3** | DVC versions large files by content hash without adding them to Git. |\n"
         "| MLflow run and Registry artifacts | **MinIO** | MLflow stores checkpoints, plots and deployable model bundles in `mlflow-artifacts`. |"
     )
@@ -294,7 +319,7 @@ def render_orchestration():
     st.markdown("### Airflow DAGs")
     st.markdown(
         "- **`rakuten_model_training`** — DVC prep + train, triggered by the API's `/retrain` endpoint\n"
-        "- **`rakuten_model_promotion`** — registers a loadable MLflow model, assigns its `champion` alias, then deploys that exact Registry version to the API"
+        "- **`rakuten_model_promotion`** — launches an ephemeral promotion container, pushes the retrained DVC checkpoint, registers a candidate, applies the component Macro-F1 gate, and deploys only a passing `champion`"
     )
 
     st.markdown("### Serving")
@@ -307,7 +332,7 @@ def render_orchestration():
     st.write(
         "`docker-compose.yaml` runs the serving stack (MLflow, API, Streamlit, Prometheus, Grafana); "
         "the Airflow stack is a separate compose project with its own network. "
-        "`.github/workflows/ci.yml` runs the test suite and builds all four application images on every push/PR; "
+        "`.github/workflows/ci.yml` runs the test suite and builds all five application images on every push/PR; "
         "a successful `main` push publishes them to GHCR."
     )
 
@@ -416,7 +441,7 @@ _LINKS = [
     ("Adminer", "adminer", "http://localhost:8081", "Browser UI for PostgreSQL databases"),
     ("PostgreSQL", "postgresql", "postgresql://localhost:5432", "Database endpoint; connect with a database client"),
     ("Prometheus", "prometheus", "http://localhost:9090", "Raw metrics + target health"),
-    ("Grafana", "grafana", "http://localhost:3000", "API Overview dashboard (admin/adminadmin by default)"),
+    ("Grafana", "grafana", "http://localhost:3000", "API Overview dashboard (credentials come from the local .env)"),
     ("Airflow", "apacheairflow", "http://localhost:8080", "Training + promotion DAGs"),
     ("API docs (Swagger)", "swagger", "http://localhost:8000/docs", "Interactive FastAPI docs"),
 ]

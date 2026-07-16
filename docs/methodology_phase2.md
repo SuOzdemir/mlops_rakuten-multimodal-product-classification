@@ -70,47 +70,48 @@ Use cases:
 
 ## 2. Model Promotion — Airflow DAG
 
-After training, model weights must be copied from the training output directory to the serving directory used by the FastAPI service. This is automated by the Airflow DAG `rakuten_model_promotion`.
+After training, the checkpoint must be archived, compared with the deployed model, registered, and only then installed for FastAPI. The Airflow DAG `rakuten_model_promotion` delegates this work to an ephemeral promotion container so the scheduler never imports Torch or loads model weights.
 
 ### DAG: `rakuten_model_promotion`
 
-- **Schedule:** None (triggered manually after training completes)
+- **Schedule:** None (triggered by the training DAG, with `model=image|text` in run config)
 - **Location:** `airflow_dst/dags/rakuten_model_promotion.py`
 
 ### Task graph
 
-```
-check_artifacts
-      │
-      ├──▶ promote_image_model  ──┐
-      ├──▶ promote_text_model   ──┤──▶ validate_serving_dir
-      ├──▶ promote_tokenizer    ──┤
-      └──▶ promote_label_maps   ──┘
+```text
+register_gate_and_deploy (DockerOperator)
+  → ephemeral promotion container
+  → validate artifacts
+  → dvc push reproduced checkpoint
+  → register MLflow candidate
+  → compare component Macro-F1 with champion
+  → passing candidate: assign champion + atomic deploy
+  → rejected candidate: retain Registry version, leave champion unchanged
 ```
 
 ### What each task does
 
-| Task | Source | Destination |
-|------|--------|-------------|
-| `check_artifacts` | Verifies all required training outputs exist | — |
-| `promote_image_model` | `models/I12_ConvNeXt_Base_*/best_model_state_dict.pt` | `data/rakuten_streamlit_predictor/image_model/best_model_base.pt` |
-| `promote_text_model` | `models/T8_CamemBERT_*/best_model_text.pt` | `data/rakuten_streamlit_predictor/text_model/best_model_text.pt` |
-| `promote_tokenizer` | Local `camembert-base` directory | `data/rakuten_streamlit_predictor/text_model/camembert_base/` |
-| `promote_label_maps` | `outputs/image_modeling/label2id.json` | `data/rakuten_streamlit_predictor/label2id.json` |
-| `validate_serving_dir` | Checks all required serving files exist and are non-empty | — |
+| Step | Source | Destination/result |
+|------|--------|--------------------|
+| Validate | Checkpoints, metadata, tokenizer and maps | Fails before Registry mutation if anything is missing |
+| Archive | Reproduced `train_image` or `train_text` DVC stage | `s3://dvc-data` |
+| Register | Complete image + text serving bundle | New `rakuten-multimodal-classifier` candidate version |
+| Gate | Candidate component Macro-F1 vs. tagged champion metric | Accept/reject decision with reason stored as tags |
+| Deploy | Accepted `models:/rakuten-multimodal-classifier@champion` | Atomic replacement of `data/rakuten_streamlit_predictor/` |
 
 ### Trigger
 
 ```bash
 # From Airflow UI or CLI:
-airflow dags trigger rakuten_model_promotion
+airflow dags trigger rakuten_model_promotion --conf '{"model":"text"}'
 ```
 
 ### Run Airflow
 
 ```bash
 cd airflow_dst
-docker compose up
+docker compose --env-file ../.env up
 # UI at http://localhost:8080
 ```
 
@@ -204,7 +205,7 @@ Both `models/*/train.py` need the raw Kaggle dataset in `data/raw/` (`./scripts/
 
 ```
 POST /login
-  body: username=admin&password=adminadmin
+  body: username=admin&password=$API_ADMIN_PASSWORD
   response: {"access_token": "<token>", "token_type": "bearer"}
 
 POST /predict
@@ -324,8 +325,9 @@ Each buildable image installs only what it needs (not the full `pyproject.toml` 
 | `src/api/Dockerfile` | `src/api/requirements.txt` (+ CPU-only torch/torchvision installed inline) |
 | `streamlit_app/Dockerfile` | `streamlit_app/requirements.txt` |
 | `airflow_dst/Dockerfile` | `airflow_dst/requirements.txt` (adds `mlflow` client on top of `apache/airflow:2.10.0`) |
+| `promotion/Dockerfile` | `promotion/requirements.txt` (+ CPU-only torch/torchvision installed inline) |
 
-Airflow builds its own image with the MLflow client. The promotion DAG registers a complete pyfunc bundle, assigns the `champion` alias, downloads that Registry version, and atomically installs its assets in the serving directory.
+Airflow only orchestrates promotion. The promotion image contains DVC, MLflow and model-loading dependencies; it registers a complete pyfunc bundle, applies the gate, assigns the `champion` alias only on acceptance, downloads that Registry version, and atomically installs its assets.
 
 ---
 
@@ -342,7 +344,7 @@ Airflow builds its own image with the MLflow client. The promotion DAG registers
 
 3. PROMOTE
    Airflow DAG: rakuten_model_promotion
-   Registers the complete bundle and deploys models:/rakuten-multimodal-classifier@champion
+   DVC-pushes the checkpoint, registers a candidate, gates it, and deploys only an accepted champion
 
 4. SERVE
    docker compose up --build      # or: make up (incl. mlflow) / make serve (api+streamlit only)
@@ -365,7 +367,7 @@ CI (`.github/workflows/ci.yml`) runs `pytest` + a Docker build check for `api`/`
 | `MLFLOW_TRACKING_URI` | airflow DAG | `http://host.docker.internal:5001` | Registry registration and champion deployment endpoint |
 | `USERS_DB_PATH` | api | `config/users.db` | SQLite user store location |
 | `AIRFLOW_API_URL` | api | `http://host.docker.internal:8080` | Airflow REST API base URL, used by `/retrain` |
-| `AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD` | api | `admin` / `adminadmin` | Basic Auth credentials for the Airflow REST API |
+| `AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD` | api | Required via the local `.env` | Basic Auth credentials for the Airflow REST API |
 | `API_URL` | streamlit | `http://localhost:8000` | FastAPI server URL |
 | `RAKUTEN_PROJECT_DIR` | airflow DAG | `/project` | Project root in container |
 | `CAMEMBERT_BASE_DIR` | airflow DAG | `streamlit_app/models/camembert_run4` | Path to local CamemBERT base files |
