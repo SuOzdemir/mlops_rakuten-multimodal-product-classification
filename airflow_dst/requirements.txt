@@ -12,3 +12,4 @@ dvc
 pandas
 scikit-learn
 apache-airflow-providers-docker
+mlflow

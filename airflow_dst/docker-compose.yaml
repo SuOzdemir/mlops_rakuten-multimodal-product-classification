@@ -18,7 +18,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth  # lets /retrain call the REST API
     RAKUTEN_PROJECT_DIR: ${RAKUTEN_PROJECT_DIR:-/project}
-    CAMEMBERT_BASE_DIR: ${CAMEMBERT_BASE_DIR:-/project/data/camembert_base}
+    CAMEMBERT_BASE_DIR: ${CAMEMBERT_BASE_DIR:-/project/data/rakuten_streamlit_predictor/text_model/camembert_run4}
     MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5001}
   volumes:
     - ./dags:/opt/airflow/dags
@@ -52,7 +52,7 @@ services:
     <<: *airflow-common
     command: >
       bash -c "airflow db migrate &&
-      airflow users create --username admin --password admin
+      airflow users create --username admin --password adminadmin
       --firstname Admin --lastname Admin --role Admin --email admin@example.com"
     restart: "no"
 

@@ -8,7 +8,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://api:api@postgres:543
 
 # Seeded on first run only, so an existing table is never overwritten.
 DEFAULT_USERS = [
-    ("admin", "admin", "admin"),
+    ("admin", "adminadmin", "admin"),
     ("user", "user", "viewer"),
 ]
 

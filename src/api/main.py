@@ -1,6 +1,8 @@
 import io
+import json
 import secrets
 import sys
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,6 +22,12 @@ from streamlit_app.services.raw_late_fusion_predictor import load_assets, predic
 
 _tokens: dict[str, dict[str, str]] = {}  # token → {"username":..., "role":...}
 _assets = None
+_assets_deployment_id = None
+_assets_lock = threading.Lock()
+_deployment_manifest = (
+    Path(__file__).resolve().parent.parent.parent
+    / "data" / "rakuten_streamlit_predictor" / "deployment_manifest.json"
+)
 
 
 def _get_token(request: Request) -> str:
@@ -47,9 +55,24 @@ def _require_admin(request: Request) -> dict[str, str]:
 # Startup
 # -------------------------------------------------------------------
 def _get_assets():
-    global _assets
-    if _assets is None:
-        _assets = load_assets()
+    global _assets, _assets_deployment_id
+    deployment_id = None
+    if _deployment_manifest.exists():
+        try:
+            manifest = json.loads(_deployment_manifest.read_text(encoding="utf-8"))
+            deployment_id = (manifest.get("version"), manifest.get("run_id"))
+        except (OSError, json.JSONDecodeError):
+            # Promotion writes the manifest after an atomic directory swap. A
+            # concurrent request may briefly see no/partial manifest; keep the
+            # already-loaded model and retry on the next request.
+            deployment_id = _assets_deployment_id
+
+    if _assets is None or deployment_id != _assets_deployment_id:
+        with _assets_lock:
+            if _assets is None or deployment_id != _assets_deployment_id:
+                new_assets = load_assets()
+                _assets = new_assets
+                _assets_deployment_id = deployment_id
     return _assets
 
 
@@ -162,10 +185,14 @@ async def predict_endpoint(
 # Retrain — admin only
 # -------------------------------------------------------------------
 @app.post("/retrain")
-def retrain_endpoint(request: Request, model: ModelName = Form(...)):
+def retrain_endpoint(
+    request: Request,
+    model: ModelName = Form(...),
+    epochs: int = Form(3, ge=1, le=50),
+):
     _require_admin(request)
     try:
-        job = start_retrain(model)
+        job = start_retrain(model, epochs=epochs)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except RequestException as exc:

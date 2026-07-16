@@ -119,22 +119,18 @@ MLflow's backend store is a shared Postgres instance (`postgres` service in `doc
 the same Postgres also backs Airflow's metadata DB (reached via `host.docker.internal` from the
 separate `airflow_dst` compose stack), so there's one database server instead of two SQLite files.
 
-### Model promotion (Airflow DAG)
+### Model Registry and deployment (Airflow DAG)
 
-After training is complete, the Airflow DAG `rakuten_model_promotion` copies the best model weights to the serving directory consumed by the FastAPI service:
+After training, `rakuten_model_promotion` assembles a complete, loadable
+multimodal serving bundle and logs it as an MLflow `pyfunc` model named
+`rakuten-multimodal-classifier`. The new version receives the `champion`
+alias. The DAG then downloads `models:/rakuten-multimodal-classifier@champion`
+back from MLflow and atomically replaces `data/rakuten_streamlit_predictor/`.
 
-```
-Training outputs                   Serving directory
-──────────────────────────────     ──────────────────────────────────────
-models/I12_ConvNeXt_Base/      →   data/rakuten_streamlit_predictor/
-  best_model_state_dict.pt           image_model/best_model_base.pt
-models/T8_CamemBERT/           →     text_model/best_model_text.pt
-  best_model_text.pt                 text_model/camembert_base/
-outputs/image_modeling/        →   label2id.json
-  label2id.json                    prdtypecode_mapping.json
-```
-
-The DAG runs manually (triggered after training) and validates the serving directory before finishing.
+The registered model and the API therefore use the same image weights,
+fine-tuned text weights, tokenizer, label map and category map. A
+`deployment_manifest.json` in the serving directory records the deployed
+MLflow version and run ID.
 
 ### Retrain pipeline (Airflow DAG + ephemeral trainer + DVC + API)
 
@@ -303,6 +299,11 @@ docker compose up --build
 # or: make up
 ```
 
+The `make up`, `make up-all`, `make airflow-up`, `make serve`, and
+`make manual-up` commands first run `make docker-up`. On macOS this starts
+Docker Desktop automatically when it is closed and waits for the Docker
+daemon to become ready.
+
 Airflow (separate stack, own network — used for model promotion after training):
 
 ```bash
@@ -318,7 +319,7 @@ cd airflow_dst && docker compose up --build
 | MLflow UI | http://localhost:5001 |
 | Airflow UI | http://localhost:8080 |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (admin/admin) |
+| Grafana | http://localhost:3000 (admin/adminadmin) |
 
 Check all serving-stack services are healthy: `make health`
 
@@ -328,7 +329,7 @@ Users are stored in the shared Postgres instance (`api` database, `DATABASE_URL`
 
 | Username | Password | Role |
 |----------|----------|------|
-| `admin` | `admin` | `admin` |
+| `admin` | `adminadmin` | `admin` |
 | `user` | `user` | `viewer` |
 
 The `role` field is stored per-user but not yet enforced on any endpoint — every authenticated user currently has the same access (no admin-only routes exist yet).
@@ -338,8 +339,8 @@ The `role` field is stored per-user but not yet enforced on any endpoint — eve
 `dvc push`/`dvc pull` share DVC-tracked data/models via the local MinIO instance (`s3://dvc-data`, same MinIO MLflow's artifacts use — started by `make up`). The remote's URL/endpoint (`.dvc/config`) is committed, but credentials are per-machine and gitignored (`.dvc/config.local`) — run this once after cloning:
 
 ```bash
-dvc remote modify --local minio access_key_id minioadmin
-dvc remote modify --local minio secret_access_key minioadmin
+dvc remote modify --local minio access_key_id admin
+dvc remote modify --local minio secret_access_key adminadmin
 ```
 
 ### Run tests
@@ -389,7 +390,6 @@ Known gaps, not yet built:
 
 | Item | What it would add |
 |------|--------------------|
-| MLflow ↔ Airflow (promotion) | Promotion DAG picks the best run from MLflow (Model Registry) instead of a fixed local file path — separate from the retrain DAG's `/retrain` trigger, which is already wired |
 | Input-feature drift | Compare live input (text/image) distribution against the training set, not just predicted classes (see [Monitoring & Drift Detection](#monitoring--drift-detection)) |
 | Live model-performance decay | Score accuracy/F1 against real ground truth once labels become available, instead of only offline eval at training time |
 | Pipeline-failure alerting | Airflow DAG failures (training/promotion) don't currently notify anyone — no `on_failure_callback`/retries configured |

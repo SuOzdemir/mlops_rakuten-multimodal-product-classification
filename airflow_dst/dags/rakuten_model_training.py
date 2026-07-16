@@ -5,7 +5,8 @@ Prepares the train/val data splits (via DVC, in this container) and retrains
 one of the two unimodal models (image or text) in a fresh, ephemeral
 `trainer` container (see trainer/Dockerfile, docker-compose.yaml). Triggered
 per-model via the Airflow REST API by the FastAPI `/retrain` endpoint (see
-src/api/retrain.py) — the `model` param selects which training script runs.
+src/api/retrain.py) — `model` selects the script and `epochs` sets the
+maximum number of training epochs.
 
 Run order:
   prepare_data      (dvc repro prepare_splits, in this container)
@@ -37,8 +38,8 @@ would.
 
 Trigger examples
 -----------------
-  CLI  : airflow dags trigger rakuten_model_training --conf '{"model": "text"}'
-  UI   : Trigger DAG w/ config -> {"model": "image"}
+  CLI  : airflow dags trigger rakuten_model_training --conf '{"model": "text", "epochs": 3}'
+  UI   : Trigger DAG w/ config -> {"model": "image", "epochs": 3}
   REST : POST /api/v1/dags/rakuten_model_training/dagRuns
          body: {"conf": {"model": "text"}}
 
@@ -48,10 +49,8 @@ Trigger examples
   --force to the train stage only, so it doesn't also re-run prepare_splits
   (already done by prepare_data).
 
-  To bound a run's duration/data size (e.g. a real end-to-end check without
-  waiting hours), set MAX_EPOCHS_OVERRIDE / TRAIN_ROWS_OVERRIDE /
-  VAL_ROWS_OVERRIDE in this DAG's environment (see the models' config.py) —
-  there's no dedicated retrain param for this, it's meant for manual runs.
+  Epoch count is supplied per run. TRAIN_ROWS_OVERRIDE / VAL_ROWS_OVERRIDE
+  can still be set in this DAG's environment to bound the data size.
 
 Environment variables
 ---------------------
@@ -111,6 +110,7 @@ TRAIN_STAGES = {
     catchup=False,
     params={
         "model": Param("text", enum=list(TRAIN_STAGES)),
+        "epochs": Param(3, type="integer", minimum=1, maximum=50),
     },
     tags=["mlops", "training", "rakuten"],
 )
@@ -146,7 +146,8 @@ def rakuten_model_training():
         environment={
             "MODEL": "{{ params.model }}",
             "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5001"),
-            "MAX_EPOCHS_OVERRIDE": os.environ.get("MAX_EPOCHS_OVERRIDE", ""),
+            "MLFLOW_REQUIRED": "true",
+            "MAX_EPOCHS_OVERRIDE": "{{ params.epochs }}",
             "TRAIN_ROWS_OVERRIDE": os.environ.get("TRAIN_ROWS_OVERRIDE", ""),
             "VAL_ROWS_OVERRIDE": os.environ.get("VAL_ROWS_OVERRIDE", ""),
         },

@@ -75,7 +75,7 @@ def main() -> None:
     # ----------------------------------------------------------
     _mlflow_active = False
     try:
-        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001"))
         mlflow.set_experiment("rakuten-text-modeling")
         mlflow.start_run(run_name=config.RUN_NAME)
         mlflow.log_params({
@@ -92,7 +92,9 @@ def main() -> None:
         })
         _mlflow_active = True
     except Exception as _e:
-        print(f"[MLflow] Tracking disabled: {_e}")
+        if os.environ.get("MLFLOW_REQUIRED", "true").lower() == "true":
+            raise RuntimeError(f"MLflow setup failed: {_e}") from _e
+        print(f"[MLflow] Tracking disabled by configuration: {_e}")
 
     # ----------------------------------------------------------
     # 3. Load splits & label mapping
@@ -356,4 +358,9 @@ def main() -> None:
 # Entry point
 # ============================================================
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        if mlflow.active_run() is not None:
+            mlflow.end_run(status="FAILED")
+        raise

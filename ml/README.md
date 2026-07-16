@@ -68,22 +68,16 @@ only, no retraining), then copied over.
 |---|---|---|
 | `rakuten-image-modeling` | I12 (and future image models) | Per-family comparison, own param/metric schema |
 | `rakuten-text-modeling` | T8 (and future text models) | Same as above, for text models |
-| `rakuten-multimodal-classifier` | LateFusion, Model Registry | Name required by the task sheet (11.2); the fusion/registry-worthy run |
+| `rakuten-production-bundles` | Promotion DAG | Complete deployable multimodal bundles |
 
 ## Model Registry & promotion (11.6 / 11.7)
 
-The fusion run is registered as `rakuten-multimodal-classifier`. The
-registered "model" is a thin `mlflow.pyfunc.PythonModel` used for
-versioning/lineage only — per `docs/methodology_phase2.md`, the FastAPI
-service does **not** load models via MLflow at request time, it imports
-`streamlit_app/services/raw_late_fusion_predictor.py` directly.
-
-Promotion rule (`promote_if_threshold_met` in `ml/mlflow_backfill.py`):
-Macro F1 >= 0.72 -> `Production`, else stays in `Staging`.
-
-Uses the classic Stages API (`transition_model_version_stage`), which the
-task sheet names explicitly, even though MLflow recommends aliases since
-2.9. Revisit if stages are removed in a future MLflow major version.
+`rakuten_model_promotion` registers a real, loadable MLflow pyfunc named
+`rakuten-multimodal-classifier`. It contains both checkpoints, the tokenizer
+and label/category mappings. The DAG assigns the `champion` alias and deploys
+the assets downloaded from `models:/rakuten-multimodal-classifier@champion`.
+`ml/mlflow_backfill.py` is only a legacy experiment-history importer and is
+not part of production promotion.
 
 ## Known env quirks (Windows)
 

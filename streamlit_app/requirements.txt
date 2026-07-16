@@ -2,3 +2,4 @@ streamlit>=1.40.0
 pillow>=10.0.0
 pandas>=2.2.0
 requests
+minio>=7.2.0

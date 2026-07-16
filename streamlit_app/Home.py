@@ -17,6 +17,7 @@ from project_story import (
 )
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
+MLFLOW_PUBLIC_URL = os.environ.get("MLFLOW_PUBLIC_URL", "http://localhost:5001")
 
 st.set_page_config(
     page_title="Rakuten Product Classifier",
@@ -102,12 +103,12 @@ def api_predict(token: str, designation: str, description: str, image: Image.Ima
         return None
 
 
-def api_retrain(token: str, model: str) -> dict | None:
+def api_retrain(token: str, model: str, epochs: int) -> dict | None:
     try:
         resp = requests.post(
             f"{API_URL}/retrain",
             headers={"Authorization": f"Bearer {token}"},
-            data={"model": model},
+            data={"model": model, "epochs": epochs},
             timeout=15,
         )
         if resp.status_code == 200:
@@ -283,9 +284,13 @@ def render_prediction():
         "Tracking & Versioning",
         "Orchestration & Deployment",
         "Monitoring",
-        "Plugins & Links",
     ]
-    pages = story_pages + ["Predict"] + (["Retrain (Admin)"] if is_admin else [])
+    pages = (
+        story_pages
+        + ["Predict"]
+        + (["Retrain (Admin)"] if is_admin else [])
+        + ["Plugins & Links"]
+    )
     page = st.sidebar.radio("Navigation", pages, label_visibility="collapsed")
 
     if st.sidebar.button("Log out"):
@@ -434,17 +439,31 @@ STATUS_COLOR = {
 def render_retrain():
     st.title("Model Retraining")
     st.caption("Triggers the Airflow DAG `rakuten_model_training` (DVC prep + train) via its REST API.")
+    st.info(
+        "After the job completes, open MLflow and select the latest image or text run. "
+        "Use the Metrics section for interactive epoch charts, or open "
+        "Artifacts → training_curves.png for the generated summary image."
+    )
+    st.link_button("Open MLflow results", MLFLOW_PUBLIC_URL)
 
     if "retrain_job_id" not in st.session_state:
         st.session_state.retrain_job_id = None
 
     with st.form("retrain_form"):
         model = st.selectbox("Model", ["image", "text"], format_func=lambda m: {"image": "Image — ConvNeXt-Base (I12)", "text": "Text — CamemBERT (T8)"}[m])
+        epochs = st.number_input(
+            "Epochs",
+            min_value=1,
+            max_value=50,
+            value=3,
+            step=1,
+            help="Maximum training epochs. Early stopping may finish the run sooner.",
+        )
         submitted = st.form_submit_button("Start Retrain", use_container_width=True)
 
     if submitted:
         with st.spinner("Triggering Airflow DAG..."):
-            job = api_retrain(st.session_state["token"], model=model)
+            job = api_retrain(st.session_state["token"], model=model, epochs=int(epochs))
         if job:
             st.session_state.retrain_job_id = job["job_id"]
             st.success(f"Job started: `{job['job_id']}`")
@@ -462,7 +481,7 @@ def render_retrain():
         job = api_retrain_status(st.session_state["token"], st.session_state.retrain_job_id)
         if job:
             emoji = STATUS_COLOR.get(job["status"], "⚪")
-            st.markdown(f"**Status:** {emoji} {job['status']}  |  **Model:** {job['model']}  |  **Started:** {job.get('started_at') or '-'}")
+            st.markdown(f"**Status:** {emoji} {job['status']}  |  **Model:** {job['model']}  |  **Epochs:** {job.get('epochs', '-')}  |  **Started:** {job.get('started_at') or '-'}")
         else:
             st.warning("Could not fetch job status (Airflow unreachable or job not found).")
 
@@ -474,7 +493,7 @@ def render_retrain():
     else:
         for job in jobs:
             emoji = STATUS_COLOR.get(job["status"], "⚪")
-            st.write(f"{emoji} `{job['job_id']}` — model: **{job['model']}** — status: **{job['status']}** — started: {job.get('started_at') or '-'}")
+            st.write(f"{emoji} `{job['job_id']}` — model: **{job['model']}** — epochs: **{job.get('epochs', '-')}** — status: **{job['status']}** — started: {job.get('started_at') or '-'}")
 
     if auto_refresh:
         import time

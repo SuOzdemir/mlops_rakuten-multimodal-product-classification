@@ -204,7 +204,7 @@ Both `models/*/train.py` need the raw Kaggle dataset in `data/raw/` (`./scripts/
 
 ```
 POST /login
-  body: username=admin&password=admin
+  body: username=admin&password=adminadmin
   response: {"access_token": "<token>", "token_type": "bearer"}
 
 POST /predict
@@ -325,7 +325,7 @@ Each buildable image installs only what it needs (not the full `pyproject.toml` 
 | `streamlit_app/Dockerfile` | `streamlit_app/requirements.txt` |
 | `airflow_dst/Dockerfile` | `airflow_dst/requirements.txt` (adds `mlflow` client on top of `apache/airflow:2.10.0`) |
 
-Airflow used to run the stock `apache/airflow:2.10.0` image as-is; it now builds from its own `Dockerfile` so the promotion DAG can eventually query MLflow's Model Registry instead of copying a fixed file path (not implemented yet — see README Roadmap).
+Airflow builds its own image with the MLflow client. The promotion DAG registers a complete pyfunc bundle, assigns the `champion` alias, downloads that Registry version, and atomically installs its assets in the serving directory.
 
 ---
 
@@ -342,7 +342,7 @@ Airflow used to run the stock `apache/airflow:2.10.0` image as-is; it now builds
 
 3. PROMOTE
    Airflow DAG: rakuten_model_promotion
-   Copies weights to data/rakuten_streamlit_predictor/
+   Registers the complete bundle and deploys models:/rakuten-multimodal-classifier@champion
 
 4. SERVE
    docker compose up --build      # or: make up (incl. mlflow) / make serve (api+streamlit only)
@@ -361,11 +361,11 @@ CI (`.github/workflows/ci.yml`) runs `pytest` + a Docker build check for `api`/`
 
 | Variable | Service | Default | Description |
 |----------|---------|---------|-------------|
-| `MLFLOW_TRACKING_URI` | api | `http://mlflow:5001` | MLflow server URL (set but not yet called at runtime) |
-| `MLFLOW_TRACKING_URI` | airflow DAG | `http://host.docker.internal:5001` | For future MLflow Model Registry lookups from the promotion DAG |
+| `MLFLOW_TRACKING_URI` | trainer | `http://mlflow:5001` | Required experiment-tracking endpoint |
+| `MLFLOW_TRACKING_URI` | airflow DAG | `http://host.docker.internal:5001` | Registry registration and champion deployment endpoint |
 | `USERS_DB_PATH` | api | `config/users.db` | SQLite user store location |
 | `AIRFLOW_API_URL` | api | `http://host.docker.internal:8080` | Airflow REST API base URL, used by `/retrain` |
-| `AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD` | api | `admin` / `admin` | Basic Auth credentials for the Airflow REST API |
+| `AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD` | api | `admin` / `adminadmin` | Basic Auth credentials for the Airflow REST API |
 | `API_URL` | streamlit | `http://localhost:8000` | FastAPI server URL |
 | `RAKUTEN_PROJECT_DIR` | airflow DAG | `/project` | Project root in container |
 | `CAMEMBERT_BASE_DIR` | airflow DAG | `streamlit_app/models/camembert_run4` | Path to local CamemBERT base files |

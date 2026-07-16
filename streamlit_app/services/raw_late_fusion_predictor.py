@@ -20,6 +20,7 @@ ASSET_DIR = DATA_DIR / "rakuten_streamlit_predictor"
 CATEGORY_MAPPING_PATH = ASSET_DIR / "prdtypecode_mapping.json"
 IMAGE_WEIGHTS_PATH = ASSET_DIR / "image_model" / "best_model_base.pt"
 TEXT_MODEL_DIR = ASSET_DIR / "text_model" / "camembert_run4"
+TEXT_WEIGHTS_PATH = ASSET_DIR / "text_model" / "best_model_text.pt"
 
 
 # ------------------------------------------------------------
@@ -30,6 +31,7 @@ TEXT_MAX_LENGTH = 128
 
 DEFAULT_IMAGE_WEIGHT = 0.45
 DEFAULT_TEXT_WEIGHT = 0.55
+IMAGE_DROPOUT = 0.5
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -51,9 +53,14 @@ IMAGE_TRANSFORM = transforms.Compose([
 # Model builder
 # ------------------------------------------------------------
 def build_convnext_base(num_classes: int) -> nn.Module:
+    """Rebuild the exact classification head used by the I12 trainer."""
     model = models.convnext_base(weights=None)
     n_features = model.classifier[2].in_features
-    model.classifier[2] = nn.Linear(n_features, num_classes)
+    model.classifier[2] = nn.Sequential(
+        nn.LayerNorm(n_features),
+        nn.Dropout(IMAGE_DROPOUT),
+        nn.Linear(n_features, num_classes),
+    )
     return model
 
 
@@ -67,47 +74,61 @@ def load_json(path: Path) -> dict:
 # ------------------------------------------------------------
 # Asset loading
 # ------------------------------------------------------------
-def load_assets() -> dict:
+def load_assets(asset_dir: str | Path | None = None) -> dict:
+    """Load one self-contained serving bundle.
+
+    ``asset_dir`` is optional for the API's normal on-disk deployment, and is
+    supplied by the MLflow pyfunc model when a Registry version is loaded.
+    """
+    asset_dir = Path(asset_dir) if asset_dir is not None else ASSET_DIR
+    category_mapping_path = asset_dir / "prdtypecode_mapping.json"
+    image_weights_path = asset_dir / "image_model" / "best_model_base.pt"
+    text_model_dir = asset_dir / "text_model" / "camembert_run4"
+    text_weights_path = asset_dir / "text_model" / "best_model_text.pt"
+
     for path in [
-        CATEGORY_MAPPING_PATH,
-        IMAGE_WEIGHTS_PATH,
-        TEXT_MODEL_DIR / "config.json",
-        TEXT_MODEL_DIR / "model.safetensors",
-        TEXT_MODEL_DIR / "label2id.json",
-        TEXT_MODEL_DIR / "tokenizer.json",
-        TEXT_MODEL_DIR / "tokenizer_config.json",
+        category_mapping_path,
+        image_weights_path,
+        text_weights_path,
+        text_model_dir / "config.json",
+        text_model_dir / "model.safetensors",
+        text_model_dir / "label2id.json",
+        text_model_dir / "tokenizer.json",
+        text_model_dir / "tokenizer_config.json",
     ]:
         if not path.exists():
             raise FileNotFoundError(f"Missing required asset: {path}")
 
-    raw_label2id = load_json(TEXT_MODEL_DIR / "label2id.json")
+    raw_label2id = load_json(text_model_dir / "label2id.json")
     label2id = {int(k): int(v) for k, v in raw_label2id.items()}
     id2label = {v: k for k, v in label2id.items()}
 
-    category_mapping_raw = load_json(CATEGORY_MAPPING_PATH)
+    category_mapping_raw = load_json(category_mapping_path)
     category_mapping = {int(k): str(v) for k, v in category_mapping_raw.items()}
 
     num_classes = len(label2id)
 
     # Image model
     image_model = build_convnext_base(num_classes)
-    image_state = torch.load(IMAGE_WEIGHTS_PATH, map_location="cpu", weights_only=True)
+    image_state = torch.load(image_weights_path, map_location="cpu", weights_only=True)
     image_model.load_state_dict(image_state)
     image_model.to(DEVICE)
     image_model.eval()
 
     # Text model — loaded directly from full HuggingFace checkpoint
     tokenizer = AutoTokenizer.from_pretrained(
-        str(TEXT_MODEL_DIR),
+        str(text_model_dir),
         local_files_only=True,
     )
 
     text_model = CamembertForSequenceClassification.from_pretrained(
-        str(TEXT_MODEL_DIR),
+        str(text_model_dir),
         num_labels=num_classes,
         local_files_only=True,
         ignore_mismatched_sizes=True,
     )
+    text_state = torch.load(text_weights_path, map_location="cpu", weights_only=True)
+    text_model.load_state_dict(text_state)
     text_model.to(DEVICE)
     text_model.eval()
 

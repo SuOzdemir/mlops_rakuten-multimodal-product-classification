@@ -8,9 +8,8 @@ LateFusion (multimodal) runs from data/model_artifacts/, without retraining
 (checkpoints and metrics already exist on disk — see ml/README.md for how
 that folder is populated).
 
-Then registers the LateFusion run as the "rakuten-multimodal-classifier"
-model in the MLflow Model Registry and applies the promotion rule from the
-task sheet (Macro F1 >= 0.72 -> Production).
+This is a legacy history-import tool only. Production registration and
+deployment are handled by the Airflow promotion DAG.
 
 Experiment naming:
   - "rakuten-image-modeling" / "rakuten-text-modeling"
@@ -50,11 +49,8 @@ if sys.platform == "win32":
 from pathlib import Path
 
 import mlflow
-from mlflow.exceptions import MlflowException
-from mlflow.tracking import MlflowClient
 
 ARTIFACT_ROOT = Path(__file__).resolve().parent.parent / "data" / "model_artifacts"
-PROMOTION_THRESHOLD = 0.72  # Task 11.7 example rule: Macro F1 >= 0.72
 REGISTERED_MODEL_NAME = "rakuten-multimodal-classifier"
 
 mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001"))
@@ -197,29 +193,6 @@ def backfill_t8() -> tuple[str, dict]:
     return run_id, metrics
 
 
-class LateFusionModel(mlflow.pyfunc.PythonModel):
-    """
-    Registry entry for the late-fusion (I12 + T8) model.
-
-    Per the project's architecture (docs/methodology_phase2.md), MLflow is
-    used for experiment tracking / promotion — the FastAPI service does NOT
-    load models via MLflow at request time, it imports
-    streamlit_app/services/raw_late_fusion_predictor.py directly. This class
-    exists to give the fusion result a real, versioned Model Registry entry
-    (component checkpoints + fusion recipe as artifacts/params), not to be
-    the production inference path.
-    """
-
-    def load_context(self, context):
-        self.alpha = context.model_config.get("alpha") if context.model_config else None
-
-    def predict(self, context, model_input, params=None):
-        raise NotImplementedError(
-            "This registry entry tracks lineage/versioning for the late-fusion model. "
-            "Actual inference is served by streamlit_app/services/raw_late_fusion_predictor.py."
-        )
-
-
 def backfill_and_register_latefusion(image_run_id: str, text_run_id: str) -> tuple[str, dict]:
     print("[MM_CamemBERT_ConvNeXtBase_LateFusion]")
     d = ARTIFACT_ROOT / "MM_CamemBERT_ConvNeXtBase_LateFusion"
@@ -257,46 +230,9 @@ def backfill_and_register_latefusion(image_run_id: str, text_run_id: str) -> tup
             if fpath.exists():
                 mlflow.log_artifact(str(fpath))
 
-        mlflow.pyfunc.log_model(
-            name="model",
-            python_model=LateFusionModel(),
-            model_config={"alpha": meta["best_alpha"]},
-            registered_model_name=REGISTERED_MODEL_NAME,
-        )
         run_id = run.info.run_id
-    print(f"  logged + registered run '{meta['model_name']}' -> {REGISTERED_MODEL_NAME}  (run_id={run_id})")
+    print(f"  logged historical run '{meta['model_name']}' (run_id={run_id})")
     return run_id, metrics
-
-
-def promote_if_threshold_met(
-    client: MlflowClient,
-    model_name: str,
-    run_id: str,
-    metric_value: float,
-    threshold: float = PROMOTION_THRESHOLD,
-    metric_name: str = "macro_f1",
-) -> str:
-    """Task 11.7 — promote to Production only if the run clears the threshold.
-
-    Uses the classic Staging/Production Stages API (transition_model_version_stage),
-    which the task sheet names explicitly. MLflow >=2.9 recommends aliases instead
-    and stages will be removed in a future major release — if this is still around
-    when that happens, migrate to `set_registered_model_alias`.
-    """
-    versions = client.search_model_versions(f"name='{model_name}' and run_id='{run_id}'")
-    if not versions:
-        raise RuntimeError(f"No registered model version found for run_id={run_id}")
-    version = versions[0].version
-
-    if metric_value >= threshold:
-        stage = "Production"
-        client.transition_model_version_stage(name=model_name, version=version, stage=stage)
-        print(f"  PROMOTED v{version} -> {stage}  ({metric_name}={metric_value:.4f} >= {threshold})")
-    else:
-        stage = "Staging"
-        client.transition_model_version_stage(name=model_name, version=version, stage=stage)
-        print(f"  kept v{version} in {stage}  ({metric_name}={metric_value:.4f} < {threshold}, not promoted)")
-    return stage
 
 
 def main() -> None:
@@ -304,15 +240,9 @@ def main() -> None:
 
     image_run_id, _ = backfill_i12()
     text_run_id, _ = backfill_t8()
-    fusion_run_id, fusion_metrics = backfill_and_register_latefusion(image_run_id, text_run_id)
+    backfill_and_register_latefusion(image_run_id, text_run_id)
 
-    client = MlflowClient()
-    try:
-        promote_if_threshold_met(client, REGISTERED_MODEL_NAME, fusion_run_id, fusion_metrics["macro_f1"])
-    except MlflowException as exc:
-        print(f"  [error] promotion step failed: {exc}")
-
-    print("\nDone. Open the MLflow UI to inspect runs and the registered model.")
+    print("\nDone. Open the MLflow UI to inspect the imported historical runs.")
 
 
 if __name__ == "__main__":

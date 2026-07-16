@@ -8,7 +8,7 @@ DAG_ID = "rakuten_model_training"
 
 AIRFLOW_API_URL = os.environ.get("AIRFLOW_API_URL", "http://host.docker.internal:8080")
 AIRFLOW_API_USER = os.environ.get("AIRFLOW_API_USER", "admin")
-AIRFLOW_API_PASSWORD = os.environ.get("AIRFLOW_API_PASSWORD", "admin")
+AIRFLOW_API_PASSWORD = os.environ.get("AIRFLOW_API_PASSWORD", "adminadmin")
 _AUTH = (AIRFLOW_API_USER, AIRFLOW_API_PASSWORD)
 _TIMEOUT = 10
 
@@ -25,7 +25,7 @@ class ModelName(str, Enum):
     text = "text"
 
 
-def start_retrain(model: ModelName) -> dict:
+def start_retrain(model: ModelName, epochs: int = 3) -> dict:
     # Blocks on ANY in-flight retrain, not just the same model: every retrain
     # runs `dvc repro` against the same shared project checkout, and DVC's
     # lock (.dvc/tmp/rwlock) is repo-wide, not per-stage. Two different
@@ -42,7 +42,10 @@ def start_retrain(model: ModelName) -> dict:
     resp = requests.post(
         f"{AIRFLOW_API_URL}/api/v1/dags/{DAG_ID}/dagRuns",
         auth=_AUTH,
-        json={"dag_run_id": dag_run_id, "conf": {"model": model.value}},
+        json={
+            "dag_run_id": dag_run_id,
+            "conf": {"model": model.value, "epochs": epochs},
+        },
         timeout=_TIMEOUT,
     )
     resp.raise_for_status()
@@ -76,6 +79,7 @@ def _public(dag_run: dict, model: str | None = None) -> dict:
     return {
         "job_id": dag_run["dag_run_id"],
         "model": model or conf.get("model"),
+        "epochs": conf.get("epochs", 3),
         "status": _STATE_MAP.get(dag_run.get("state"), dag_run.get("state") or "unknown"),
         "started_at": dag_run.get("start_date") or dag_run.get("logical_date"),
     }

@@ -21,6 +21,18 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Lightweight browser UI for inspecting the shared PostgreSQL databases.
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8081:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   # S3-compatible object storage for MLflow artifacts (and, later, a DVC
   # remote) -- replaces the bind-mounted ./mlruns dir. Ephemeral compute
   # (trainer) writes nothing to its own disk that needs to survive it.
@@ -32,8 +44,8 @@ services:
     volumes:
       - minio_data:/data
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=adminadmin
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -51,7 +63,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc alias set local http://minio:9000 admin adminadmin &&
       mc mb -p local/mlflow-artifacts &&
       mc mb -p local/dvc-data &&
       echo 'buckets ready'
@@ -76,15 +88,15 @@ services:
       # host.docker.internal (Docker Desktop's host-forwarding proxy) still 403
       # even with the identical, allowed Host header — a Docker Desktop for Mac
       # NAT quirk, not something fixable from the allowlist. This is a local,
-      # single-machine dev stack (no DVC remote, admin/admin auth everywhere
+      # single-machine dev stack (local demo credentials are used throughout
       # already) so disabling the check entirely is the pragmatic fix.
       MLFLOW_SERVER_DISABLE_SECURITY_MIDDLEWARE: "true"
       # --serve-artifacts (below) proxies all artifact I/O through mlflow
       # itself, so only mlflow needs these MinIO credentials -- clients
       # (trainer, api, notebooks) never see them, they just talk to mlflow.
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: adminadmin
     command: >
       mlflow server
       --host 0.0.0.0
@@ -123,6 +135,7 @@ services:
     environment:
       - MODEL=${MODEL:-image}
       - MLFLOW_TRACKING_URI=http://mlflow:5001
+      - MLFLOW_REQUIRED=true
       - MAX_EPOCHS_OVERRIDE=${MAX_EPOCHS_OVERRIDE:-}
       - TRAIN_ROWS_OVERRIDE=${TRAIN_ROWS_OVERRIDE:-}
       - VAL_ROWS_OVERRIDE=${VAL_ROWS_OVERRIDE:-}
@@ -145,7 +158,6 @@ services:
     volumes:
       - ./data/rakuten_streamlit_predictor:/project/data/rakuten_streamlit_predictor:ro
     environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5001
       # Auth users table, same shared postgres instance as mlflow/airflow
       # (db "api", created by scripts/postgres_init/create_databases.sql) —
       # replaces the old config/users.db SQLite file.
@@ -153,7 +165,7 @@ services:
       # Airflow lives in the separate airflow_dst compose stack (own network).
       - AIRFLOW_API_URL=${AIRFLOW_API_URL:-http://host.docker.internal:8080}
       - AIRFLOW_API_USER=${AIRFLOW_API_USER:-admin}
-      - AIRFLOW_API_PASSWORD=${AIRFLOW_API_PASSWORD:-admin}
+      - AIRFLOW_API_PASSWORD=${AIRFLOW_API_PASSWORD:-adminadmin}
     depends_on:
       postgres:
         condition: service_healthy
@@ -185,7 +197,17 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=adminadmin
+      # SMTP settings used by Grafana's provisioned email contact point.
+      # Put credentials only in the local, gitignored .env file.
+      - GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${GF_SMTP_HOST:-smtp.gmail.com:587}
+      - GF_SMTP_USER=${GF_SMTP_USER:-}
+      - GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD:-}
+      - GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-}
+      - GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Rakuten MLOps Alerts}
+      - GF_SMTP_SKIP_VERIFY=${GF_SMTP_SKIP_VERIFY:-false}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-recipient@example.com}
       # Slack Incoming Webhook URL for the drift-alert contact point
       # (monitoring/grafana/provisioning/alerting/contactpoints.yaml) --
       # set in a local, gitignored .env file, never hardcoded.
@@ -202,6 +224,10 @@ services:
       - "8501:8501"
     environment:
       - API_URL=http://api:8000
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=adminadmin
+      - MINIO_SECURE=false
     depends_on:
       api:
         condition: service_healthy

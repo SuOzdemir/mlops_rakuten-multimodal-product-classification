@@ -1,11 +1,103 @@
+import os
+from html import escape
+
 import streamlit as st
+
+
+_TOOL_ICONS = {
+    "MLflow": ("mlflow",),
+    "Git & DVC": ("git", "dvc"),
+    "MinIO": ("minio",),
+    "PostgreSQL": ("postgresql",),
+    "Apache Airflow": ("apacheairflow",),
+    "FastAPI": ("fastapi",),
+    "Streamlit": ("streamlit",),
+    "Docker & Docker Compose": ("docker",),
+    "GitHub Actions": ("githubactions",),
+    "Prometheus": ("prometheus",),
+    "Grafana": ("grafana",),
+    "PSI (Population Stability Index)": ("chartdotjs",),
+}
+
+
+def _tool_explanation(name: str, purpose: str, project_usage: str) -> None:
+    """Render a compact tool summary with small official-style icons."""
+    def inline_code(text: str) -> str:
+        parts = text.split("`")
+        return "".join(
+            f"<code>{escape(part)}</code>" if index % 2 else escape(part)
+            for index, part in enumerate(parts)
+        )
+
+    icons = "".join(
+        f'<img src="https://cdn.simpleicons.org/{escape(slug)}" '
+        f'alt="" width="18" height="18" style="vertical-align:middle;margin-right:5px;">'
+        for slug in _TOOL_ICONS.get(name, ("tools",))
+    )
+    with st.container(border=True):
+        st.markdown(
+            f'<div style="display:flex;align-items:center;margin-bottom:6px;">'
+            f'{icons}<strong>{escape(name)}</strong></div>'
+            f'<ul style="margin-top:0;margin-bottom:0;padding-left:22px;">'
+            f'<li>{inline_code(purpose)}</li>'
+            f'<li><strong>In this project:</strong> {inline_code(project_usage)}</li>'
+            f'</ul>',
+            unsafe_allow_html=True,
+        )
+
+
+def _format_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _list_minio_objects() -> tuple[list[dict], str | None]:
+    """Return model-related objects from the local MinIO buckets."""
+    try:
+        from minio import Minio
+
+        client = Minio(
+            os.environ.get("MINIO_ENDPOINT", "minio:9000"),
+            access_key=os.environ.get("MINIO_ACCESS_KEY", "admin"),
+            secret_key=os.environ.get("MINIO_SECRET_KEY", "adminadmin"),
+            secure=os.environ.get("MINIO_SECURE", "false").lower() == "true",
+        )
+        rows = []
+        model_markers = (
+            ".pt", ".pth", ".safetensors", "mlmodel", "model.pkl",
+            "registered_model", "checkpoint", "best_model",
+        )
+        for bucket in ("mlflow-artifacts", "dvc-data"):
+            if not client.bucket_exists(bucket):
+                continue
+            for item in client.list_objects(bucket, recursive=True):
+                object_name = item.object_name or ""
+                if not any(marker in object_name.lower() for marker in model_markers):
+                    continue
+                rows.append({
+                    "Bucket": bucket,
+                    "Object": object_name,
+                    "Size": _format_bytes(item.size or 0),
+                    "Last modified": (
+                        item.last_modified.strftime("%Y-%m-%d %H:%M UTC")
+                        if item.last_modified else "—"
+                    ),
+                })
+        return rows, None
+    except Exception as exc:
+        return [], str(exc)
+
 
 # -------------------------------------------------------------------
 # 1. Overview
 # -------------------------------------------------------------------
 def render_overview():
     st.title("Rakuten Product Classifier — Overview")
-    st.caption("A walkthrough of what this project does and how it's built.")
+    st.caption("An overview of the problem, models, and end-to-end MLOps workflow.")
 
     st.markdown("### Task")
     st.write(
@@ -28,8 +120,20 @@ def render_overview():
         "fallback to text-only or image-only when one modality is missing."
     )
 
-    st.markdown("### Tracked metrics")
-    st.write("`val_accuracy` and `val_f1` (macro F1) are logged per epoch to MLflow during training.")
+    st.markdown("### MLOps Project Goal")
+    st.write(
+        "This project goes beyond training a classification model. Its goal is to build a "
+        "reproducible and observable machine-learning system that covers the complete model "
+        "lifecycle: data preparation, versioned training, experiment tracking, model registration, "
+        "deployment, prediction, retraining, and monitoring."
+    )
+    st.write(
+        "A user can request a prediction through Streamlit, while an administrator can trigger "
+        "retraining from the same interface. FastAPI provides the service layer, Airflow orchestrates "
+        "the retraining and promotion workflow, DVC versions data and checkpoints, and MLflow records "
+        "experiments and the deployable model version. Prometheus and Grafana make the running system "
+        "observable after deployment."
+    )
 
 
 # -------------------------------------------------------------------
@@ -37,30 +141,46 @@ def render_overview():
 # -------------------------------------------------------------------
 def render_data_training():
     st.title("Data & Training")
+    st.caption("How raw data becomes reproducible, versioned model artifacts.")
 
-    st.markdown("### Getting the data")
-    st.code("./scripts/setup_data.sh", language="bash")
-    st.write("Downloads the raw Kaggle dataset into `data/raw/` (not committed to git).")
-
-    st.markdown("### DVC pipeline")
+    st.markdown("### 1. Data acquisition")
     st.write(
-        "The `prepare_splits` DVC stage (`dvc.yaml`) turns the raw CSVs into "
-        "reproducible train/val split files:"
+        "The project starts by downloading the Rakuten product CSV files and images "
+        "from Kaggle. Raw data is stored under `data/raw/` and is excluded from Git "
+        "because it is large and should not be versioned as source code."
     )
+    st.code("./scripts/setup_data.sh", language="bash")
+
+    st.markdown("### 2. Reproducible preprocessing with DVC")
+    st.write(
+        "Preprocessing is defined as the `prepare_splits` stage in `dvc.yaml`. "
+        "DVC connects the raw dataset, preprocessing script, and generated outputs "
+        "as one reproducible pipeline stage. If neither the data nor the script changes, "
+        "the stage is not run again unnecessarily."
+    )
+    st.code("uv run dvc repro prepare_splits", language="bash")
+    st.write("The stage produces versioned inputs shared by both models:")
     st.markdown(
         "- `outputs/image_modeling/train_split.csv`\n"
         "- `outputs/image_modeling/val_split.csv`\n"
         "- `outputs/image_modeling/label2id.json`"
     )
-    st.code("uv run dvc repro prepare_splits", language="bash")
 
-    st.markdown("### Training")
+    st.markdown("### 3. Versioned model training")
     st.write(
-        "Each model has its own `train.py` + `config.py` under `models/`, run as a "
-        "separate DVC stage (`train_image`, `train_text`). Both write a best-checkpoint "
-        "`.pt` file plus `history.json`/`run_metadata.json`, and support "
-        "`MAX_EPOCHS_OVERRIDE`/`TRAIN_ROWS_OVERRIDE`/`VAL_ROWS_OVERRIDE` env vars for a "
-        "bounded, real (non-subsampled-model) sanity run of the whole pipeline."
+        "Image and text training are separate DVC stages: `train_image` and `train_text`. "
+        "Both consume the same versioned split and label mapping, which keeps their "
+        "validation results comparable. Each stage produces a best checkpoint plus "
+        "`history.json` and `run_metadata.json`. DVC records the resulting artifact hashes "
+        "in `dvc.lock`, linking each model output to the data and code that produced it."
+    )
+
+    st.markdown("### Why this is MLOps")
+    st.info(
+        "The important outcome is not only a trained model. The complete path from raw data "
+        "to a checkpoint is repeatable, dependency-aware, and versioned. The same DVC stages "
+        "can be executed locally, from Airflow, or inside the trainer container without "
+        "manually repeating preprocessing steps."
     )
 
 
@@ -70,18 +190,48 @@ def render_data_training():
 def render_tracking():
     st.title("Tracking & Versioning")
 
-    st.markdown("### MLflow")
-    st.write(
-        "Every training run logs metrics, params, and artifacts to MLflow "
-        "(experiment tracking + Model Registry), backed by a shared Postgres "
-        "instance also used by Airflow's metadata store — a single database "
-        "server instead of two separate SQLite files."
+    _tool_explanation(
+        "MLflow",
+        "Tracks experiment parameters, metrics, and artifacts and manages deployable versions through the Model Registry.",
+        "Each image or text retraining run logs epoch metrics and its best checkpoint. The promotion DAG registers the complete multimodal bundle as `rakuten-multimodal-classifier` and deploys the version referenced by the `champion` alias.",
     )
-
-    st.markdown("### DVC")
+    _tool_explanation(
+        "Git & DVC",
+        "Git versions source code, while DVC versions large data and model files that are unsuitable for Git.",
+        "We track Python, YAML, and Docker files with Git, and track data splits and model checkpoints by content hash with DVC.",
+    )
+    _tool_explanation(
+        "MinIO",
+        "An S3-compatible object-storage service for keeping large artifacts in centralized persistent storage.",
+        "We use separate buckets on the same MinIO server for MLflow artifacts and the DVC remote, so model and data files survive container replacement.",
+    )
+    st.markdown("### Models stored in MinIO")
     st.write(
-        "`dvc.yaml`/`dvc.lock` version the raw data, split files, and trained model "
-        "weights by content hash, independent of git."
+        "This is a live view of model-related objects stored in MinIO. "
+        "`mlflow-artifacts` contains artifacts uploaded by MLflow runs and Model Registry bundles. "
+        "`dvc-data` contains content-addressed files pushed by DVC; its object names may therefore "
+        "look like hashes instead of human-readable model names."
+    )
+    if st.button("Refresh MinIO objects", width="content"):
+        _list_minio_objects.clear()
+    minio_rows, minio_error = _list_minio_objects()
+    if minio_error:
+        st.warning(
+            "MinIO objects could not be loaded. Make sure the MinIO service is running. "
+            f"Connection detail: {minio_error}"
+        )
+    elif minio_rows:
+        st.dataframe(minio_rows, width="stretch", hide_index=True)
+        st.caption(f"Showing {len(minio_rows)} model-related objects. MinIO Console: http://localhost:9001")
+    else:
+        st.info(
+            "No model-related objects were found yet. Complete a tracked training run for "
+            "MLflow artifacts, or run `uv run dvc push` to populate the DVC remote."
+        )
+    _tool_explanation(
+        "PostgreSQL",
+        "Stores persistent, queryable application data in relational tables.",
+        "One PostgreSQL server hosts separate databases for MLflow run metadata, Airflow pipeline metadata, and API users.",
     )
     st.success(
         "DVC remote is wired up to the local MinIO instance (`s3://dvc-data`, same MinIO "
@@ -98,10 +248,37 @@ def render_tracking():
 def render_orchestration():
     st.title("Orchestration & Deployment")
 
+    st.markdown("### Tools used in this stage")
+    _tool_explanation(
+        "Apache Airflow",
+        "Schedules multi-step workflows as DAGs and records the status of every task.",
+        "The Retrain button in Streamlit triggers the `rakuten_model_training` DAG through FastAPI. The DAG prepares data, trains the selected model in a trainer container, and starts the promotion DAG after a successful run.",
+    )
+    _tool_explanation(
+        "FastAPI",
+        "A Python framework for building typed REST APIs with automatic Swagger documentation.",
+        "It provides login/logout, multimodal `/predict`, retraining, and job-status endpoints. The production model is loaded only by the API service.",
+    )
+    _tool_explanation(
+        "Streamlit",
+        "Builds interactive data and machine-learning web interfaces directly in Python.",
+        "It provides authentication, product image/text inputs, prediction results, and the administrator retraining screen. It communicates with FastAPI over HTTP instead of loading models directly.",
+    )
+    _tool_explanation(
+        "Docker & Docker Compose",
+        "Runs applications with their dependencies in isolated containers, while Compose manages multiple services together.",
+        "We run the API, Streamlit, MLflow, MinIO, PostgreSQL, and monitoring services in one development stack. Resource-intensive training runs in a temporary trainer container.",
+    )
+    _tool_explanation(
+        "GitHub Actions",
+        "A continuous-integration service that automatically runs checks when code changes.",
+        "On pushes and pull requests, it runs pytest and verifies that the application Docker images can be built.",
+    )
+
     st.markdown("### Airflow DAGs")
     st.markdown(
         "- **`rakuten_model_training`** — DVC prep + train, triggered by the API's `/retrain` endpoint\n"
-        "- **`rakuten_model_promotion`** — copies the best trained weights into the serving directory read by the API"
+        "- **`rakuten_model_promotion`** — registers a loadable MLflow model, assigns its `champion` alias, then deploys that exact Registry version to the API"
     )
 
     st.markdown("### Serving")
@@ -123,6 +300,23 @@ def render_orchestration():
 # -------------------------------------------------------------------
 def render_monitoring():
     st.title("Monitoring & Alerts")
+
+    st.markdown("### Tools used in this stage")
+    _tool_explanation(
+        "Prometheus",
+        "Collects time-series metrics from applications at regular intervals and stores them for querying.",
+        "It scrapes FastAPI's `/metrics` endpoint every five seconds and collects request count, latency, error rate, prediction confidence, and drift metrics.",
+    )
+    _tool_explanation(
+        "Grafana",
+        "Visualizes metrics from sources such as Prometheus through dashboards and alert rules.",
+        "The `Rakuten API Overview` dashboard displays request rate, p50/p95 latency, and 5xx errors. Grafana also evaluates the PSI drift alert.",
+    )
+    _tool_explanation(
+        "PSI (Population Stability Index)",
+        "Measures how far a live distribution has moved from a reference distribution to indicate possible prediction drift.",
+        "We compare the category distribution of the latest 200 predictions with the training reference. PSI is calculated after at least 30 predictions, and Grafana raises an alert if it remains above 0.25.",
+    )
 
     st.markdown("### Metrics collection")
     st.write(
@@ -175,8 +369,8 @@ def render_monitoring():
             "  - Raw metric: Prometheus gauges `prediction_drift_psi` / "
             "`prediction_drift_window_size` (`/metrics`)\n"
             "  - Dashboard: Grafana → *Rakuten API Overview*\n"
-            "  - Alert: Grafana → *Alerting* → *Rakuten Alerts* folder, routed to Slack via "
-            "`contactpoints.yaml` (`SLACK_WEBHOOK_URL`, set in a local `.env`)"
+            "  - Alert: Grafana → *Alerting* → *Rakuten Alerts* folder, routed to email and "
+            "optionally Slack via `contactpoints.yaml` (credentials are set in a local `.env`)"
         )
 
     with st.expander("4. System/service health — details"):
@@ -200,23 +394,34 @@ def render_monitoring():
 # 6. Plugins & Links
 # -------------------------------------------------------------------
 _LINKS = [
-    ("MLflow", "http://localhost:5001", "Experiment tracking + Model Registry"),
-    ("Prometheus", "http://localhost:9090", "Raw metrics + target health"),
-    ("Grafana", "http://localhost:3000", "API Overview dashboard (admin/admin by default)"),
-    ("Airflow", "http://localhost:8080", "Training + promotion DAGs"),
-    ("API docs (Swagger)", "http://localhost:8000/docs", "Interactive FastAPI docs"),
+    ("MLflow", "mlflow", "http://localhost:5001", "Experiment tracking + Model Registry"),
+    ("MinIO Console", "minio", "http://localhost:9001", "MLflow and DVC object storage"),
+    ("Adminer", "adminer", "http://localhost:8081", "Browser UI for PostgreSQL databases"),
+    ("PostgreSQL", "postgresql", "postgresql://localhost:5432", "Database endpoint; connect with a database client"),
+    ("Prometheus", "prometheus", "http://localhost:9090", "Raw metrics + target health"),
+    ("Grafana", "grafana", "http://localhost:3000", "API Overview dashboard (admin/adminadmin by default)"),
+    ("Airflow", "apacheairflow", "http://localhost:8080", "Training + promotion DAGs"),
+    ("API docs (Swagger)", "swagger", "http://localhost:8000/docs", "Interactive FastAPI docs"),
 ]
 
 
 def render_links():
     st.title("Plugins & Links")
-    st.caption("Opens in a new tab — requires the relevant service to be running (`make up` / `make up-all`).")
-
-    for name, url, description in _LINKS:
-        col_label, col_button = st.columns([3, 1])
-        with col_label:
-            st.markdown(f"**{name}**")
-            st.caption(description)
-        with col_button:
-            st.link_button(f"Open {name}", url, use_container_width=True)
-        st.divider()
+    st.caption("Interfaces for the services used in this project. The relevant service must be running through `make up` or `make up-all`.")
+    items = "".join(
+        f'<li style="display:flex;align-items:center;gap:8px;margin:7px 0;">'
+        f'<img src="https://cdn.simpleicons.org/{escape(icon)}" alt="" '
+        f'width="16" height="16" style="flex:0 0 16px;">'
+        f'<a href="{escape(url)}" target="_blank" '
+        f'style="font-weight:600;text-decoration:none;">{escape(name)}</a>'
+        f'<a href="{escape(url)}" target="_blank" '
+        f'style="font-family:monospace;font-size:0.78rem;text-decoration:none;">'
+        f'{escape(url)}</a>'
+        f'<span style="font-size:0.82rem;color:#808495;">— {escape(description)}</span>'
+        f'</li>'
+        for name, icon, url, description in _LINKS
+    )
+    st.markdown(
+        f'<ul style="list-style:none;padding-left:0;margin-top:8px;">{items}</ul>',
+        unsafe_allow_html=True,
+    )

@@ -304,14 +304,29 @@ def plot_and_save_history(
         ]
 
         for train_col, val_col, title, ax in plots:
-            if train_col in df.columns:
-                ax.plot(df["epoch"], df[train_col], "-o", label="Train", linewidth=2)
-            if val_col in df.columns:
-                ax.plot(df["epoch"], df[val_col],   "-o", label="Val",   linewidth=2)
+            if len(df) == 1:
+                values = [float(df.iloc[0][train_col]), float(df.iloc[0][val_col])]
+                bars = ax.bar(["Train", "Validation"], values, color=["#2563eb", "#f97316"])
+                for bar, value in zip(bars, values):
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height(),
+                        f"{value:.4f}",
+                        ha="center",
+                        va="bottom",
+                        fontweight="bold",
+                    )
+                ax.set_xlabel("Single-epoch run")
+                ax.set_ylim(0, max(values) * 1.25 if max(values) > 0 else 1)
+            else:
+                if train_col in df.columns:
+                    ax.plot(df["epoch"], df[train_col], "-o", label="Train", linewidth=2)
+                if val_col in df.columns:
+                    ax.plot(df["epoch"], df[val_col], "-o", label="Validation", linewidth=2)
+                ax.set_xlabel("Epoch")
+                ax.legend()
             ax.set_title(title)
-            ax.set_xlabel("Epoch")
             ax.set_ylabel(title)
-            ax.legend()
             ax.grid(True, linestyle="--", alpha=0.7)
 
         plt.tight_layout()

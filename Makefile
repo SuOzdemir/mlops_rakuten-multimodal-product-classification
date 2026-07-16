@@ -1,4 +1,27 @@
-.PHONY: install setup-data prepare-splits up serve up-all down down-all restart-all logs health airflow-up airflow-down airflow-logs test manual-up manual-down manual-up-all manual-down-all
+.PHONY: install setup-data prepare-splits docker-up up serve up-all down down-all restart-all logs health airflow-up airflow-down airflow-logs test manual-up manual-down manual-up-all manual-down-all
+
+# Ensure the Docker daemon is available. On macOS, start Docker Desktop when
+# needed and wait up to two minutes for it to become ready.
+docker-up:
+	@if docker info >/dev/null 2>&1; then \
+		echo "Docker is ready."; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Docker Desktop is not running; starting it..."; \
+		open -a Docker; \
+		attempt=0; \
+		until docker info >/dev/null 2>&1; do \
+			attempt=$$((attempt + 1)); \
+			if [ $$attempt -ge 60 ]; then \
+				echo "ERROR: Docker Desktop did not become ready within 120 seconds."; \
+				exit 1; \
+			fi; \
+			sleep 2; \
+		done; \
+		echo "Docker Desktop is ready."; \
+	else \
+		echo "ERROR: Docker daemon is not running. Start Docker, then retry."; \
+		exit 1; \
+	fi
 
 # Local dev/training environment (pyproject.toml): notebooks, training scripts
 install:
@@ -19,7 +42,7 @@ prepare-splits:
 # (5001/8000/8501) — both modes bound to the same port at once means whichever
 # one didn't win the socket silently never receives traffic, e.g. mlflow's
 # Host-header check rejecting requests that actually reached the *other* mlflow.
-up:
+up: docker-up
 	@if pgrep -f "mlflow server" >/dev/null || pgrep -f "uvicorn src.api.main:app" >/dev/null || pgrep -f "streamlit run streamlit_app/Home.py" >/dev/null; then \
 		echo "ERROR: manual-up's native processes (mlflow/api/streamlit) are still running on ports 5001/8000/8501."; \
 		echo "Run 'make manual-down' first, or use manual-up-all instead of the Docker stack."; \
@@ -38,7 +61,7 @@ down-all: down airflow-down
 restart-all: down-all up-all
 
 # Just api (:8000) + streamlit (:8501), no mlflow — same ports every time
-serve:
+serve: docker-up
 	docker compose up --build -d api streamlit
 
 down:
@@ -53,7 +76,7 @@ health:
 	curl -sf http://localhost:8501/_stcore/health && echo " streamlit ok"
 
 # Training/promotion stack: separate compose project, own network
-airflow-up:
+airflow-up: docker-up
 	cd airflow_dst && docker compose up --build -d
 
 airflow-down:
@@ -70,7 +93,7 @@ test:
 # Refuses to start if the Docker stack is already up on the same ports — see
 # the matching guard on `up` for why running both at once is broken, not just
 # wasteful.
-manual-up:
+manual-up: docker-up
 	@if [ -n "$$(docker compose ps -q mlflow api streamlit 2>/dev/null)" ]; then \
 		echo "ERROR: docker compose stack (mlflow/api/streamlit) is already running on ports 5001/8000/8501."; \
 		echo "Run 'make down' first, or use the Docker stack instead of manual-up."; \

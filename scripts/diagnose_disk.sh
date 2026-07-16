@@ -49,7 +49,7 @@ echo "============================================================"
 if docker ps --format '{{.Names}}' | grep -q '^mlops-rakuten-product-classification-minio-1$'; then
   docker run --rm --network mlops-rakuten-product-classification_default \
     --entrypoint sh minio/mc -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1
+      mc alias set local http://minio:9000 admin adminadmin >/dev/null 2>&1
       echo '  mlflow-artifacts bucket:'
       mc du local/mlflow-artifacts 2>/dev/null | sed 's/^/    /' || echo '    (empty or unreachable)'
       echo '  dvc-data bucket:'

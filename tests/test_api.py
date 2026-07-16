@@ -41,6 +41,26 @@ def _fake_get_user(username: str):
 def _fake_verify_password(password: str, user: dict) -> bool:
     return user["password"] == password
 
+
+def test_get_assets_reloads_when_registry_deployment_changes(tmp_path, monkeypatch):
+    manifest = tmp_path / "deployment_manifest.json"
+    manifest.write_text('{"version": "1", "run_id": "run-1"}', encoding="utf-8")
+    first_assets = object()
+    second_assets = object()
+
+    monkeypatch.setattr(api_module, "_deployment_manifest", manifest)
+    monkeypatch.setattr(api_module, "_assets", None)
+    monkeypatch.setattr(api_module, "_assets_deployment_id", None)
+    loader = MagicMock(side_effect=[first_assets, second_assets])
+    monkeypatch.setattr(api_module, "load_assets", loader)
+
+    assert api_module._get_assets() is first_assets
+    assert api_module._get_assets() is first_assets
+
+    manifest.write_text('{"version": "2", "run_id": "run-2"}', encoding="utf-8")
+    assert api_module._get_assets() is second_assets
+    assert loader.call_count == 2
+
 FAKE_PREDICT_RESULT = {
     "mode": "Text only",
     "text_used": "livre cuisine",
@@ -363,6 +383,7 @@ def test_predict_custom_image_weight(client, auth_headers):
 FAKE_JOB = {
     "job_id": "retrain_text_abc123",
     "model": "text",
+    "epochs": 3,
     "status": "running",
     "started_at": "2026-01-01T00:00:00+00:00",
 }
@@ -383,7 +404,27 @@ def test_retrain_admin_starts_job(client, auth_headers):
         resp = client.post("/retrain", headers=auth_headers, data={"model": "text"})
     assert resp.status_code == 200
     assert resp.json() == FAKE_JOB
-    mock_start.assert_called_once_with("text")
+    mock_start.assert_called_once_with("text", epochs=3)
+
+
+def test_retrain_admin_passes_custom_epochs(client, auth_headers):
+    with patch("src.api.main.start_retrain", return_value=FAKE_JOB) as mock_start:
+        resp = client.post(
+            "/retrain",
+            headers=auth_headers,
+            data={"model": "text", "epochs": 5},
+        )
+    assert resp.status_code == 200
+    mock_start.assert_called_once_with("text", epochs=5)
+
+
+def test_retrain_rejects_invalid_epochs(client, auth_headers):
+    resp = client.post(
+        "/retrain",
+        headers=auth_headers,
+        data={"model": "text", "epochs": 0},
+    )
+    assert resp.status_code == 422
 
 
 def test_retrain_unknown_model_raises_422(client, auth_headers):
