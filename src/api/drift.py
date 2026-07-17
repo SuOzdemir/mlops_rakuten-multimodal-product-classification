@@ -24,7 +24,9 @@ from pathlib import Path
 
 REFERENCE_PATH = Path(__file__).resolve().parent / "reference_class_distribution.json"
 WINDOW_SIZE = 200
-MIN_PREDICTIONS_FOR_SCORE = 30  # below this, the window is too noisy to score
+# Temporary demo threshold. Five samples make the alert easy to exercise
+# locally, but are too noisy for a production drift decision; use 30+ there.
+MIN_PREDICTIONS_FOR_SCORE = 5
 _EPSILON = 1e-4  # avoids log(0)/div-by-0 for classes absent from a window
 
 with open(REFERENCE_PATH, encoding="utf-8") as f:

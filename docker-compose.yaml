@@ -57,8 +57,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # One-shot: creates the buckets MLflow/DVC need, then exits. Re-running is
-  # a no-op (mc mb -p doesn't fail if the bucket already exists).
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -75,11 +73,6 @@ services:
       echo 'buckets ready'
       "
 
-  # Experiment tracking + Model Registry (Chapter 11).
-  # Postgres backend store (not plain file store) is required for Model
-  # Registry features (stages: Staging/Production, promotion rules).
-  # Independent of api/streamlit — `docker compose up mlflow` on its own,
-  # or `make up` to start the full stack (mlflow -> api -> streamlit).
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     ports:
@@ -143,6 +136,14 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow:5001
       - MLFLOW_REQUIRED=true
       - MAX_EPOCHS_OVERRIDE=${MAX_EPOCHS_OVERRIDE:-}
+      - BATCH_SIZE_OVERRIDE=${BATCH_SIZE_OVERRIDE:-}
+      - LEARNING_RATE_OVERRIDE=${LEARNING_RATE_OVERRIDE:-}
+      - SEED_OVERRIDE=${SEED_OVERRIDE:-}
+      - EARLY_STOPPING_PATIENCE_OVERRIDE=${EARLY_STOPPING_PATIENCE_OVERRIDE:-}
+      - WEIGHT_DECAY_OVERRIDE=${WEIGHT_DECAY_OVERRIDE:-}
+      - USE_AMP_OVERRIDE=${USE_AMP_OVERRIDE:-}
+      - LABEL_SMOOTHING_OVERRIDE=${LABEL_SMOOTHING_OVERRIDE:-}
+      - DROPOUT_OVERRIDE=${DROPOUT_OVERRIDE:-}
       - TRAIN_ROWS_OVERRIDE=${TRAIN_ROWS_OVERRIDE:-}
       - VAL_ROWS_OVERRIDE=${VAL_ROWS_OVERRIDE:-}
     mem_limit: 8g
@@ -212,6 +213,7 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - prometheus_data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -219,10 +221,13 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    entrypoint: ["/bin/sh", "/usr/local/bin/grafana-entrypoint.sh"]
     ports:
       - "3000:3000"
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/entrypoint.sh:/usr/local/bin/grafana-entrypoint.sh:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning-base:ro
+      - ./monitoring/grafana/provisioning-slack:/etc/grafana/provisioning-slack:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     environment:

@@ -189,10 +189,31 @@ def retrain_endpoint(
     request: Request,
     model: ModelName = Form(...),
     epochs: int = Form(3, ge=1, le=50),
+    batch_size: int | None = Form(None, ge=1, le=32),
+    learning_rate: float | None = Form(None, ge=1e-7, le=1e-2),
+    seed: int | None = Form(None, ge=0, le=2_147_483_647),
+    early_stopping_patience: int | None = Form(None, ge=1, le=50),
+    weight_decay: float | None = Form(None, ge=0, le=1),
+    use_amp: bool | None = Form(None),
+    label_smoothing: float | None = Form(None, ge=0, le=0.5),
+    dropout: float | None = Form(None, ge=0, le=0.9),
 ):
     _require_admin(request)
     try:
-        job = start_retrain(model, epochs=epochs)
+        job = start_retrain(
+            model,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            seed=seed,
+            early_stopping_patience=early_stopping_patience,
+            weight_decay=weight_decay,
+            use_amp=use_amp,
+            label_smoothing=label_smoothing,
+            dropout=dropout,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except RequestException as exc:

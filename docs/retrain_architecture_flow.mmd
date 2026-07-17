@@ -1,0 +1,80 @@
+flowchart TB
+    A["👤 Admin<br/>Streamlit: Start Retrain<br/><code>model · epochs · optimizer · regularization params</code>"]
+    B["🔐 FastAPI<br/><code>POST /retrain</code><br/>Admin authorization"]
+    C{"Başka retrain<br/>çalışıyor mu?"}
+    BUSY["HTTP 409<br/>DVC repo-wide lock korunur"]
+    D["Airflow REST API<br/><code>rakuten_model_training</code><br/>DAG run oluştur"]
+
+    A --> B --> C
+    C -- "Evet" --> BUSY
+    C -- "Hayır" --> D
+
+    subgraph TRAINING["AIRFLOW — TRAINING DAG"]
+        direction LR
+        E["1 · prepare_data<br/><code>dvc repro prepare_splits</code>"]
+        F["2 · launch_trainer<br/>DockerOperator<br/>8 GB RAM · 2 GB shm"]
+        G["Ephemeral trainer<br/><code>epochs · batch · LR overrides<br/>dvc repro train_image|train_text<br/>--force --single-item</code>"]
+        H["Yeni component çıktısı<br/>best checkpoint<br/>run_metadata.json<br/>dvc.lock"]
+        I["3 · trigger_promotion<br/>Başarılı eğitimden sonra<br/>promotion sonucunu bekler"]
+
+        E --> F --> G --> H --> I
+    end
+
+    D --> E
+    G -. "epoch metrics, params, plots" .-> TRACKING
+    G -- "training başarısız / OOM" --> FAILED
+
+    subgraph PROMOTION["AIRFLOW — PROMOTION DAG"]
+        direction TB
+        J["rakuten_model_promotion<br/>Ephemeral promotion container"]
+        K["Gerekli asset doğrulaması<br/>Image checkpoint + Text checkpoint<br/>CamemBERT base/tokenizer<br/>label map + category map"]
+        L["Seçilen component checkpoint<br/><code>dvc push dvc.yaml:train_&lt;model&gt;</code>"]
+        M["Tam multimodal serving bundle<br/>Image + Text + Tokenizer + Maps"]
+        N["MLflow pyfunc candidate<br/><code>rakuten-multimodal-classifier</code><br/>Yeni Registry version"]
+        O{"Champion gate<br/>candidate component Macro-F1<br/>&gt;= champion + min_gain?"}
+
+        J --> K --> L --> M --> N --> O
+    end
+
+    I --> J
+    L --> DVCREMOTE
+    N --> TRACKING
+
+    subgraph STORES["KALICI VERİ KATMANI"]
+        direction LR
+        DVCREMOTE[("MinIO<br/><b>dvc-data</b><br/>DVC hash-addressed data/checkpoints")]
+        TRACKING["MLflow Tracking + Registry"]
+        PG[("PostgreSQL<br/><b>mlflow</b> database<br/>runs, metrics, versions, aliases")]
+        ARTIFACTS[("MinIO<br/><b>mlflow-artifacts</b><br/>plots + pyfunc bundle")]
+        TRACKING --> PG
+        TRACKING --> ARTIFACTS
+    end
+
+    O -- "Hayır" --> REJECT["❌ Candidate rejected<br/>Version audit için Registry'de kalır<br/>Mevcut champion ve API değişmez"]
+    O -- "Evet" --> CHAMPION["✅ <code>champion</code> alias<br/>Yeni Registry version'a taşınır"]
+    CHAMPION --> DOWNLOAD["Registry'den indir<br/><code>models:/rakuten-multimodal-classifier@champion</code>"]
+    DOWNLOAD --> DEPLOY["Atomic deploy<br/><code>data/rakuten_streamlit_predictor/</code><br/>+ deployment_manifest.json"]
+    DEPLOY --> SERVE["FastAPI serving<br/>Sonraki prediction'da manifest değişimini algılar<br/>bundle'ı kesintisiz hot-reload eder"]
+    SERVE --> UI["Streamlit tahminleri<br/>yeni champion modeli kullanır"]
+
+    FAILED["🔴 Training DAG failed<br/>Promotion tetiklenmez<br/>Serving modeli değişmez"]
+
+    A -. "GET /retrain/{job_id}<br/>status polling" .-> D
+
+    classDef ui fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:2px;
+    classDef api fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:2px;
+    classDef airflow fill:#fef3c7,stroke:#d97706,color:#451a03,stroke-width:2px;
+    classDef compute fill:#e0f2fe,stroke:#0284c7,color:#082f49,stroke-width:2px;
+    classDef storage fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:2px;
+    classDef decision fill:#fff7ed,stroke:#ea580c,color:#431407,stroke-width:3px;
+    classDef reject fill:#fee2e2,stroke:#dc2626,color:#450a0a,stroke-width:2px;
+    classDef success fill:#d1fae5,stroke:#059669,color:#022c22,stroke-width:2px;
+
+    class A,UI ui;
+    class B,C api;
+    class D,E,F,I,J airflow;
+    class G,H,K,L,M,N compute;
+    class DVCREMOTE,TRACKING,PG,ARTIFACTS storage;
+    class O decision;
+    class BUSY,FAILED,REJECT reject;
+    class CHAMPION,DOWNLOAD,DEPLOY,SERVE success;

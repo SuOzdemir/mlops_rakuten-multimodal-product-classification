@@ -1,0 +1,25 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: email-alerts
+    receivers:
+      - uid: email-alert-receiver
+        type: email
+        settings:
+          addresses: ${ALERT_EMAIL_TO}
+          singleEmail: true
+        disableResolveMessage: false
+
+  - orgId: 1
+    name: slack-drift-alerts
+    receivers:
+      - uid: slack-drift-receiver
+        type: slack
+        settings:
+          url: ${SLACK_WEBHOOK_URL}
+          title: "Rakuten model drift alert"
+          text: |
+            {{ range .Alerts }}
+            *{{ .Labels.alertname }}*: {{ .Annotations.summary }}
+            {{ end }}

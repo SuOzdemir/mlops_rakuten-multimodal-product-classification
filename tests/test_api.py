@@ -384,6 +384,12 @@ FAKE_JOB = {
     "job_id": "retrain_text_abc123",
     "model": "text",
     "epochs": 3,
+    "batch_size": 32,
+    "learning_rate": 2e-5,
+    "seed": 42,
+    "early_stopping_patience": 3,
+    "weight_decay": 0.01,
+    "use_amp": True,
     "status": "running",
     "started_at": "2026-01-01T00:00:00+00:00",
 }
@@ -404,18 +410,49 @@ def test_retrain_admin_starts_job(client, auth_headers):
         resp = client.post("/retrain", headers=auth_headers, data={"model": "text"})
     assert resp.status_code == 200
     assert resp.json() == FAKE_JOB
-    mock_start.assert_called_once_with("text", epochs=3)
+    mock_start.assert_called_once_with(
+        "text",
+        epochs=3,
+        batch_size=None,
+        learning_rate=None,
+        seed=None,
+        early_stopping_patience=None,
+        weight_decay=None,
+        use_amp=None,
+        label_smoothing=None,
+        dropout=None,
+    )
 
 
-def test_retrain_admin_passes_custom_epochs(client, auth_headers):
+def test_retrain_admin_passes_custom_hyperparameters(client, auth_headers):
     with patch("src.api.main.start_retrain", return_value=FAKE_JOB) as mock_start:
         resp = client.post(
             "/retrain",
             headers=auth_headers,
-            data={"model": "text", "epochs": 5},
+            data={
+                "model": "text",
+                "epochs": 5,
+                "batch_size": 16,
+                "learning_rate": 3e-5,
+                "seed": 7,
+                "early_stopping_patience": 5,
+                "weight_decay": 0.02,
+                "use_amp": "false",
+            },
         )
     assert resp.status_code == 200
-    mock_start.assert_called_once_with("text", epochs=5)
+    mock_start.assert_called_once_with(
+        "text",
+        epochs=5,
+        batch_size=16,
+        learning_rate=3e-5,
+        seed=7,
+        early_stopping_patience=5,
+        weight_decay=0.02,
+        use_amp=False,
+        label_smoothing=None,
+        dropout=None,
+    )
 
 
 def test_retrain_rejects_invalid_epochs(client, auth_headers):
@@ -423,6 +460,24 @@ def test_retrain_rejects_invalid_epochs(client, auth_headers):
         "/retrain",
         headers=auth_headers,
         data={"model": "text", "epochs": 0},
+    )
+    assert resp.status_code == 422
+
+
+def test_retrain_rejects_invalid_batch_size(client, auth_headers):
+    resp = client.post(
+        "/retrain",
+        headers=auth_headers,
+        data={"model": "text", "batch_size": 64},
+    )
+    assert resp.status_code == 422
+
+
+def test_retrain_rejects_invalid_learning_rate(client, auth_headers):
+    resp = client.post(
+        "/retrain",
+        headers=auth_headers,
+        data={"model": "text", "learning_rate": 0.1},
     )
     assert resp.status_code == 422
 

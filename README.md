@@ -14,9 +14,9 @@ Multimodal (text + image) product category classification for the Rakuten France
 | Val Macro F1 — ConvNeXt-Base (image) | Model quality | **0.692** |
 | Val Macro F1 — Late fusion (α=0.45) | Model quality | **~0.893** |
 | Public leaderboard rank | Business | Top 5 ([challengedata.ens.fr](https://challengedata.ens.fr/participants/challenges/35/ranking/public)) |
-| API test coverage | Engineering | 55 unit tests, gated in CI on every push/PR |
+| API test coverage | Engineering | 57 unit tests, gated in CI on every push/PR |
 | Serving latency / uptime | Ops | Prometheus + Grafana (`Rakuten API Overview` dashboard) |
-| Prediction drift | Ops | PSI-based tracker, alerted via Grafana → Slack when it crosses 0.25 for 2 minutes |
+| Prediction drift | Ops | PSI-based tracker, alerted via Grafana → email and optional Slack when it crosses the configured `0.60` alert threshold for 2 minutes |
 
 See [docs/methodology_phase1.md](docs/methodology_phase1.md) for modeling detail and [docs/methodology_phase2.md](docs/methodology_phase2.md) for the MLOps pipeline.
 
@@ -35,7 +35,7 @@ See [docs/methodology_phase1.md](docs/methodology_phase1.md) for modeling detail
 │                          │                    │        (artifacts + DVC   │
 │                          ▼                    ▼            remote data)  │
 │                    ┌───────────┐        ┌───────────┐                    │
-│                    │ Prometheus│──────▶ │  Grafana  │──▶ Slack (alerts)  │
+│                    │ Prometheus│──────▶ │  Grafana  │──▶ Email/Slack     │
 │                    │  :9090    │        │  :3000    │                    │
 │                    └───────────┘        └───────────┘                    │
 │                          ▲                    │                          │
@@ -140,15 +140,15 @@ MLflow version and run ID.
 `POST /retrain` (admin only) doesn't run training itself — it triggers the Airflow DAG `rakuten_model_training` via Airflow's REST API. That DAG doesn't run training as a subprocess of its own scheduler either: it launches a fresh, throwaway **`trainer`** container per run (via `DockerOperator`), does the job, and is removed. Rationale, and why this replaced an earlier design that ran training as a subprocess inside the always-on Airflow scheduler:
 
 ```
-POST /retrain {model: image|text}   (admin)
+POST /retrain {model, epochs, batch_size, learning_rate}   (admin)
    → API calls Airflow REST API: POST /api/v1/dags/rakuten_model_training/dagRuns
         ↓
    DAG: prepare_data     (dvc repro prepare_splits, in the scheduler -- cheap, no ML deps)
         ↓
    DAG: launch_trainer   (DockerOperator, via docker-socket-proxy, launches a fresh
                           `trainer` container: dvc repro train_image|train_text --force
-                          --single-item, model from dag_run conf; container is removed
-                          on success)
+                          --single-item; model, epochs, batch size and learning rate
+                          come from dag_run conf; container is removed on success)
         ↓
    DAG: trigger_promotion (on success, triggers rakuten_model_promotion and waits for it)
 
@@ -164,6 +164,13 @@ container — it got OOM-killed under any real load. The `trainer` container get
 discarded after.
 
 A few things worth knowing:
+- Retrain defaults are model-aware: image uses batch `16` and head LR `5e-5`; text
+  uses batch `32` and LR `2e-5`. For image retraining, the selected learning rate
+  controls the classifier head and the pretrained backbone uses one tenth of it.
+  The Streamlit form also exposes seed, early-stopping patience, weight decay and
+  AMP; image retraining additionally exposes label smoothing and classifier dropout.
+  Architecture and input size/token length are visible but read-only because the
+  production serving bundle depends on those contracts.
 - MLflow's artifact store is MinIO (S3-compatible), not a bind-mounted directory, so the
   `trainer` container never needs storage credentials — only `MLFLOW_TRACKING_URI`.
 - Airflow talks to `docker-socket-proxy`, not the raw host Docker socket, so
@@ -192,8 +199,8 @@ The API exposes Prometheus metrics at `/metrics` (`prometheus-fastapi-instrument
 `src/api/drift.py` also tracks prediction drift — whether the live mix of predicted categories is drifting away from the training set's class distribution:
 - Metric: Population Stability Index (PSI) — `<0.1` none, `0.1–0.25` moderate, `>0.25` significant
 - Compared against `src/api/reference_class_distribution.json` (built by `scripts/compute_reference_distribution.py`)
-- Scored over the last 200 predictions (in-memory, resets on API restart), needs at least 30 before it scores at all
-- Exposed as Prometheus gauges `prediction_drift_psi` / `prediction_drift_window_size`, and alerted on in Grafana (`monitoring/grafana/provisioning/alerting/`) — fires when PSI stays above 0.25 for 2 minutes, routed to Slack via `SLACK_WEBHOOK_URL` (see `.env.example`)
+- Scored over the last 200 predictions (in-memory, resets on API restart); the current local-demo threshold starts scoring after 5 predictions (use 30+ in production)
+- Exposed as Prometheus gauges `prediction_drift_psi` / `prediction_drift_window_size`, and alerted on in Grafana (`monitoring/grafana/provisioning/alerting/`) — the current local-demo alert fires when PSI stays above `0.60` for 2 minutes. Email is the safe default route; the Grafana entrypoint adds the Slack contact point and route only when `SLACK_WEBHOOK_URL` is non-empty (see `.env.example`). PSI is not itself a percentage; `0.60` is the numeric threshold corresponding to the requested “60%” setting.
 
 Not covered yet: input-feature drift, live model-performance decay against real ground truth, Airflow pipeline-failure alerts, data-quality checks, and infra-resource alerts. See the Streamlit app's Monitoring page for the full breakdown of what's built vs. open.
 
@@ -276,7 +283,7 @@ Not covered yet: input-feature drift, live model-performance decay against real 
 │   ├── prometheus/prometheus.yml     # Scrapes api /metrics (docker + manual-up targets)
 │   └── grafana/
 │       ├── dashboards/                # Auto-provisioned "Rakuten API Overview" dashboard
-│       └── provisioning/alerting/     # Prediction-drift alert rule, Slack contact point, routing policy
+│       └── provisioning/alerting/     # Prediction-drift rule and safe default email routing
 │
 ├── airflow_dst/
 │   ├── docker-compose.yaml          # Airflow stack (own network, built image, docker-socket-proxy)
@@ -519,7 +526,7 @@ make test
 uv run pytest tests/ -v
 ```
 
-The suite currently contains **55 tests** across five files:
+The suite currently contains **57 tests** across five files:
 
 | File | Coverage |
 |------|----------|
@@ -553,7 +560,7 @@ Registry artifacts. These files must not be mixed together or committed to Git.
 
 1. Create a feature branch and push it to the GitHub `origin` remote.
 2. Open a pull request targeting `main`.
-3. GitHub Actions installs the locked dependencies and runs all 55 tests.
+3. GitHub Actions installs the locked dependencies and runs all 57 tests.
 4. Only after tests pass, it builds `api`, `streamlit`, `airflow`, `trainer` and `promotion` images.
 5. PR builds do **not** push images to a registry.
 6. Require this workflow in the `main` branch protection rules before merging.
@@ -642,7 +649,7 @@ have been chosen.
 | Orchestration | Apache Airflow (DockerOperator-launched ephemeral `trainer` container) |
 | Containerisation | Docker, Docker Compose |
 | CI | GitHub Actions |
-| Monitoring | Prometheus + Grafana, PSI-based prediction-drift alerting → Slack |
+| Monitoring | Prometheus + Grafana, PSI-based prediction-drift alerting → email/optional Slack |
 
 ---
 

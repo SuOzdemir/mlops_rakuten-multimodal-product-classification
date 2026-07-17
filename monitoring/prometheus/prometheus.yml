@@ -1,6 +1,9 @@
 global:
   scrape_interval: 5s
 
+rule_files:
+  - "rules.yml"
+
 scrape_configs:
   # api running via `docker compose up` (docker network service name)
   - job_name: api-docker

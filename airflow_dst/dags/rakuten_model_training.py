@@ -5,8 +5,9 @@ Prepares the train/val data splits (via DVC, in this container) and retrains
 one of the two unimodal models (image or text) in a fresh, ephemeral
 `trainer` container (see trainer/Dockerfile, docker-compose.yaml). Triggered
 per-model via the Airflow REST API by the FastAPI `/retrain` endpoint (see
-src/api/retrain.py) — `model` selects the script and `epochs` sets the
-maximum number of training epochs.
+src/api/retrain.py) — `model` selects the script and the submitted
+hyperparameters (epochs, batch size, LR, seed, patience, regularization and
+AMP) are forwarded to the selected trainer config.
 
 Run order:
   prepare_data      (dvc repro prepare_splits, in this container)
@@ -111,6 +112,12 @@ TRAIN_STAGES = {
     params={
         "model": Param("text", enum=list(TRAIN_STAGES)),
         "epochs": Param(3, type="integer", minimum=1, maximum=50),
+        "batch_size": Param(32, type="integer", minimum=1, maximum=32),
+        "learning_rate": Param(2e-5, type="number", minimum=1e-7, maximum=1e-2),
+        "seed": Param(42, type="integer", minimum=0, maximum=2_147_483_647),
+        "early_stopping_patience": Param(3, type="integer", minimum=1, maximum=50),
+        "weight_decay": Param(0.01, type="number", minimum=0, maximum=1),
+        "use_amp": Param(True, type="boolean"),
     },
     tags=["mlops", "training", "rakuten"],
 )
@@ -148,6 +155,14 @@ def rakuten_model_training():
             "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5001"),
             "MLFLOW_REQUIRED": "true",
             "MAX_EPOCHS_OVERRIDE": "{{ params.epochs }}",
+            "BATCH_SIZE_OVERRIDE": "{{ params.batch_size }}",
+            "LEARNING_RATE_OVERRIDE": "{{ params.learning_rate }}",
+            "SEED_OVERRIDE": "{{ params.seed }}",
+            "EARLY_STOPPING_PATIENCE_OVERRIDE": "{{ params.early_stopping_patience }}",
+            "WEIGHT_DECAY_OVERRIDE": "{{ params.weight_decay }}",
+            "USE_AMP_OVERRIDE": "{{ params.use_amp }}",
+            "LABEL_SMOOTHING_OVERRIDE": "{{ dag_run.conf.get('label_smoothing', '') }}",
+            "DROPOUT_OVERRIDE": "{{ dag_run.conf.get('dropout', '') }}",
             "TRAIN_ROWS_OVERRIDE": os.environ.get("TRAIN_ROWS_OVERRIDE", ""),
             "VAL_ROWS_OVERRIDE": os.environ.get("VAL_ROWS_OVERRIDE", ""),
         },

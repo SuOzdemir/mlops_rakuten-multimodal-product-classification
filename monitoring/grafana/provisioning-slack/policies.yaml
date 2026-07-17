@@ -11,3 +11,10 @@ policies:
         group_wait: 30s
         group_interval: 5m
         repeat_interval: 1h
+        continue: true
+      - receiver: slack-drift-alerts
+        object_matchers:
+          - ["alertname", "=", "Prediction drift (PSI) significant"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 1h

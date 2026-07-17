@@ -1,0 +1,24 @@
+groups:
+  - name: api_request_rules
+    interval: 15s
+    rules:
+      - record: handler:http_requests:rate5m
+        expr: sum(rate(http_requests_total[5m])) by (handler)
+      - record: handler:http_requests_errors:rate5m
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (handler)
+      - record: job:http_requests_error_ratio:rate5m
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+      - record: handler:http_request_duration_seconds:p50
+        expr: histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))
+      - record: handler:http_request_duration_seconds:p95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))
+      - record: handler:http_request_duration_seconds:p99
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))
+
+  - name: prediction_quality_rules
+    interval: 15s
+    rules:
+      - record: job:prediction_confidence:p50
+        expr: histogram_quantile(0.50, sum(rate(prediction_confidence_bucket[5m])) by (le))
+      - record: job:prediction_low_confidence:ratio5m
+        expr: sum(rate(prediction_confidence_bucket{le="0.5"}[5m])) / sum(rate(prediction_confidence_count[5m]))

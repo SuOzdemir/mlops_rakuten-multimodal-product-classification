@@ -68,7 +68,7 @@
     {
       "id": 5,
       "title": "Prediction drift (PSI vs. training distribution)",
-      "description": "Population Stability Index of the live top-1 class distribution (last 200 predictions) vs. the training set. NaN while the window has fewer than 30 predictions. <0.1 no significant drift, 0.1-0.25 moderate, >0.25 significant.",
+      "description": "Population Stability Index of the live top-1 class distribution (last 200 predictions) vs. the training set. NaN while the local-demo window has fewer than 5 predictions. <0.1 no significant drift, 0.1-0.25 moderate, >0.25 significant; the Grafana alert threshold is 0.60.",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
@@ -79,7 +79,7 @@
             "steps": [
               { "color": "green", "value": null },
               { "color": "yellow", "value": 0.1 },
-              { "color": "red", "value": 0.25 }
+              { "color": "red", "value": 0.60 }
             ]
           },
           "custom": { "thresholdsStyle": { "mode": "line" } }
@@ -104,6 +104,82 @@
         {
           "expr": "prediction_drift_window_size",
           "legendFormat": "window size"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Latency p99 (s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "expr": "handler:http_request_duration_seconds:p99",
+          "legendFormat": "p99 {{handler}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Low-confidence predictions (<0.5)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "job:prediction_low_confidence:ratio5m",
+          "legendFormat": "low-confidence ratio"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "API target up",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 32 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "down", "color": "red" }, "1": { "text": "up", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "up{job=~\"api-.*\"}",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "API memory (RSS)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=~\"api-.*\"}",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "API CPU rate",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=~\"api-.*\"}[5m])",
+          "legendFormat": "{{job}}"
         }
       ]
     }

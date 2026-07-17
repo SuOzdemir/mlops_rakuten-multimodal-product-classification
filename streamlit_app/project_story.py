@@ -230,6 +230,64 @@ def render_tracking():
         "copying a file into a `best-model` folder."
     )
 
+    st.markdown("### Where to view each storage layer")
+    st.caption(
+        "DVC has no separate Registry UI in this project. Its remote is the `dvc-data` bucket in "
+        "MinIO; MLflow artifacts use a second bucket, while model versions and aliases are viewed in MLflow."
+    )
+    dvc_col, artifacts_col, registry_col = st.columns(3)
+    with dvc_col:
+        with st.container(border=True):
+            st.markdown("#### DVC remote")
+            st.write("Stores large datasets, splits, and checkpoints by content hash.")
+            st.code("MinIO → Object Browser → dvc-data", language="text")
+            st.link_button("Open DVC remote in MinIO", "http://localhost:9001", width="stretch")
+    with artifacts_col:
+        with st.container(border=True):
+            st.markdown("#### MLflow artifacts")
+            st.write("Stores run plots, metrics files, checkpoints, and complete model bundles.")
+            st.code("MinIO → Object Browser → mlflow-artifacts", language="text")
+            st.link_button("Open MLflow artifacts in MinIO", "http://localhost:9001", width="stretch")
+    with registry_col:
+        with st.container(border=True):
+            st.markdown("#### MLflow Model Registry")
+            st.write("Manages candidate versions, promotion tags, and the production `champion` alias.")
+            st.code("MLflow → Models → rakuten-multimodal-classifier", language="text")
+            st.link_button("Open MLflow Model Registry", "http://localhost:5001/#/models", width="stretch")
+    st.caption(
+        "MinIO login uses `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from the local `.env`. "
+        "A Registry model appears only after a promotion container successfully registers its first candidate."
+    )
+
+    st.markdown("### Does this survive a restart?")
+    st.write(
+        "Named Docker volumes (`minio_data`, `postgres_data`, and the monitoring volumes) are stored "
+        "on disk, not in memory, so they are not tied to any single container's lifetime. "
+        "On macOS/Windows, Docker Desktop keeps every volume inside one virtual disk image "
+        "(`Docker.raw`/`Docker.vhdx`) that lives on the host disk; on Linux, volumes sit directly "
+        "under `/var/lib/docker/volumes/`. Either way, the data outlives individual containers."
+    )
+    safe_col, destroy_col = st.columns(2)
+    with safe_col:
+        st.success(
+            "**Data stays**\n\n"
+            "- `docker compose restart`\n"
+            "- `docker compose down` (no flags)\n"
+            "- `docker compose up`\n"
+            "- container crash or host reboot"
+        )
+    with destroy_col:
+        st.error(
+            "**Data is deleted**\n\n"
+            "- `docker compose down -v`\n"
+            "- `docker volume rm` / `docker volume prune`\n"
+            "- Docker Desktop → *Clean / Purge data* or *Reset to factory defaults*"
+        )
+    st.caption(
+        "So `dvc-data`, `mlflow-artifacts`, and the `champion` alias all survive normal restarts — "
+        "they are only lost through one of the explicit volume-removal actions above."
+    )
+
     st.markdown("### Models stored in MinIO")
     st.write(
         "This is a live view of model-related objects stored in MinIO. "
@@ -322,6 +380,78 @@ def render_orchestration():
         "- **`rakuten_model_promotion`** — launches an ephemeral promotion container, pushes the retrained DVC checkpoint, registers a candidate, applies the component Macro-F1 gate, and deploys only a passing `champion`"
     )
 
+    st.markdown("### DVC tasks inside the Airflow training DAG")
+    st.write(
+        "Airflow orchestrates DVC; it does not train the model inside the scheduler. "
+        "Each task has one clear responsibility and a failed task stops every downstream step."
+    )
+    st.markdown(
+        "| Airflow task | Where it runs | DVC operation | Result |\n"
+        "|---|---|---|---|\n"
+        "| `prepare_data` | Airflow scheduler (lightweight) | `dvc repro prepare_splits` | Rebuilds shared train/validation CSVs and `label2id.json` only when their dependencies changed. |\n"
+        "| `launch_trainer` | Ephemeral trainer container | `dvc repro train_image\\|train_text --force --single-item` | Applies the requested epochs, batch size and learning rate, retrains the selected component, and records the best validation Macro-F1 checkpoint in `dvc.lock`. |\n"
+        "| `trigger_promotion` | Airflow operator | Passes `model=image\\|text` and waits for `rakuten_model_promotion` | Keeps the retrain job open until candidate registration, gating, and deployment finish. |\n"
+        "| `register_gate_and_deploy` | Ephemeral promotion container | `dvc push dvc.yaml:train_image\\|train_text` | Copies the reproduced checkpoint from the local DVC cache to the `s3://dvc-data` MinIO/S3 remote. |"
+    )
+    st.code(
+        "POST /retrain {model, epochs, batch_size, learning_rate}\n"
+        "  ↓\n"
+        "prepare_data\n"
+        "  dvc repro prepare_splits\n"
+        "  ↓\n"
+        "launch_trainer (temporary container)\n"
+        "  dvc repro train_<model> --force --single-item\n"
+        "  ↓\n"
+        "trigger_promotion (waits for completion)\n"
+        "  ↓\n"
+        "register_gate_and_deploy (temporary container)\n"
+        "  dvc push dvc.yaml:train_<model>",
+        language="text",
+    )
+    st.caption(
+        "`dvc push` archives the checkpoint by content hash; it does not make the model production. "
+        "Production approval is handled separately by the MLflow Registry gate below."
+    )
+    st.info(
+        "Retrain defaults are model-aware: image uses batch 16 and head LR 5e-5; text "
+        "uses batch 32 and LR 2e-5. For ConvNeXt, the selected LR applies to the "
+        "classifier head and the pretrained backbone uses LR / 10. The form also "
+        "exposes seed, early-stopping patience, weight decay and AMP; image training "
+        "adds label smoothing and classifier dropout. Architecture and input shape "
+        "remain read-only to preserve serving compatibility."
+    )
+
+    st.markdown("### What model promotion does")
+    st.code(
+        "Image checkpoint\n"
+        "+ Text checkpoint\n"
+        "+ CamemBERT base model and tokenizer\n"
+        "+ label map\n"
+        "+ category map\n"
+        "  ↓\n"
+        "Complete, loadable multimodal bundle\n"
+        "  ↓\n"
+        "MLflow Registry candidate version\n"
+        "  ↓\n"
+        "Champion gate (candidate vs current component Macro-F1)\n"
+        "  ├─ rejected → keep candidate for audit; champion and API stay unchanged\n"
+        "  └─ accepted\n"
+        "       ↓\n"
+        "champion alias\n"
+        "       ↓\n"
+        "Download models:/rakuten-multimodal-classifier@champion\n"
+        "       ↓\n"
+        "Atomic replacement of data/rakuten_streamlit_predictor/\n"
+        "       ↓\n"
+        "FastAPI reloads the new serving bundle",
+        language="text",
+    )
+    st.info(
+        "A `best_model_*.pt` file visible in MinIO is only the best checkpoint within one "
+        "training run. It becomes the production model only after the complete bundle is registered, "
+        "passes the champion gate, receives the `champion` alias, and is installed in the API serving directory."
+    )
+
     st.markdown("### Serving")
     st.write(
         "FastAPI (`src/api/main.py`) exposes `/login`, `/predict`, and (admin-only) `/retrain`. "
@@ -357,7 +487,7 @@ def render_monitoring():
     _tool_explanation(
         "PSI (Population Stability Index)",
         "Measures how far a live distribution has moved from a reference distribution to indicate possible prediction drift.",
-        "We compare the category distribution of the latest 200 predictions with the training reference. PSI is calculated after at least 30 predictions, and Grafana raises an alert if it remains above 0.25.",
+        "We compare the category distribution of the latest 200 predictions with the training reference. The current local-demo setting calculates PSI after 5 predictions (use 30+ in production), and Grafana raises an alert if it remains above the configured 0.60 threshold.",
     )
 
     st.markdown("### Metrics collection")
@@ -380,21 +510,54 @@ def render_monitoring():
     st.markdown("### Detection & alert types")
     st.write(
         "An MLOps stack can alert on several distinct failure modes. "
-        "Status of each in this project:"
+        "The table separates the detector, metric storage, alert engine, and trigger policy:"
     )
     st.markdown(
-        "| # | Type | Status |\n"
-        "|---|------|--------|\n"
-        "| 1 | Input drift (feature distribution vs training set) | ❌ Not built |\n"
-        "| 2 | Prediction / concept drift | ✅ **Built** |\n"
-        "| 3 | Model performance decay (accuracy/F1 vs real ground truth) | ❌ Not built |\n"
-        "| 4 | System/service health (latency, error rate) | 🟡 Metrics yes, alert rule no |\n"
-        "| 5 | Pipeline/orchestration failures (Airflow DAG fails) | ❌ Not built |\n"
-        "| 6 | Data quality (missing values, schema drift) | ❌ Not built |\n"
-        "| 7 | Infra/resource (disk, container OOM) | 🟡 Healthchecks only, not in Prometheus |"
+        "| # | Type | Status | Tools and responsibilities | When to alert |\n"
+        "|---|---|---|---|---|\n"
+        "| 1 | Input drift | ❌ Not built | Python/Evidently detector → Prometheus → Grafana | "
+        "After a representative window (for example 200 rows), when feature drift remains above "
+        "the agreed threshold for 2 evaluation windows |\n"
+        "| 2 | Prediction drift | ✅ **Built** | `drift.py` calculates PSI → Prometheus stores "
+        "gauges → Grafana evaluates and notifies | After ≥5 predictions in this demo (30+ in "
+        "production), when PSI is **>0.60 for 2 minutes** |\n"
+        "| 3 | Concept drift | ❌ Not built | Airflow label-join/evaluation job → Prometheus and "
+        "MLflow → Grafana | After ground-truth labels arrive and class/segment errors degrade "
+        "significantly across 2 labeled windows |\n"
+        "| 4 | Model performance decay | ❌ Not built | Airflow evaluator → MLflow for run "
+        "history + Prometheus for live metrics → Grafana | When rolling accuracy/Macro-F1 falls "
+        "below the champion baseline or SLA for 2 evaluations |\n"
+        "| 5 | System/service health | 🟡 Metrics built; rules missing | FastAPI metrics → "
+        "Prometheus → Grafana | Recommended: 5xx rate >5% or p95 latency above the SLA for 5 min |\n"
+        "| 6 | Pipeline/orchestration failure | ❌ Alert callback not built | Airflow task state "
+        "and retry callbacks → email/Slack | Immediately when retries are exhausted or a critical "
+        "DAG/task fails |\n"
+        "| 7 | Data quality and schema drift | ❌ Not built | Pandera/Great Expectations in API "
+        "or Airflow → Prometheus → Grafana | Schema mismatch immediately; quality violation rate "
+        "above the accepted limit in a batch/window |\n"
+        "| 8 | Infra/resource | 🟡 Docker healthchecks only | cAdvisor + node-exporter → "
+        "Prometheus → Grafana | Recommended: container down for 2 min, memory >90% for 5 min, "
+        "or low-disk threshold reached |"
+    )
+    st.caption(
+        "Only row 2 has a live alert threshold in this repository. Thresholds shown for the other "
+        "rows are recommended starting policies and must be tuned from production baselines."
+    )
+    st.info(
+        "**Who does what?** The application or a batch detector calculates the signal. "
+        "**Prometheus** scrapes and stores the numeric metric. **Grafana Alerting** queries that "
+        "metric, applies the time/threshold rule, and routes the notification. For DAG failures, "
+        "**Airflow** should alert directly through task failure and retry callbacks."
     )
 
-    with st.expander("2. Prediction / concept drift — details", expanded=True):
+    st.code(
+        "Application or detector → exposes metric → Prometheus stores time series\n"
+        "                                      → Grafana evaluates rule → email/Slack\n\n"
+        "Airflow task failure → Airflow retry/failure callback → email/Slack",
+        language="text",
+    )
+
+    with st.expander("2. Prediction drift — details", expanded=True):
         st.markdown(
             "- **Metric**: Population Stability Index (PSI) between the live rolling window of "
             "predicted `prdtypecode`s and the training set's class distribution "
@@ -402,9 +565,9 @@ def render_monitoring():
             "- **Where stored**: in-memory `deque(maxlen=200)` in `src/api/drift.py` — resets on "
             "API restart, no database needed for a single-process demo. Reference distribution: "
             "`src/api/reference_class_distribution.json`.\n"
-            "- **When triggered**: scoring needs ≥30 recorded predictions "
-            "(`MIN_PREDICTIONS_FOR_SCORE`, below that the window is too noisy). The alert fires "
-            "when PSI stays **> 0.25 for 2 consecutive 1-minute evaluations** "
+            "- **When triggered**: the current local-demo setting starts scoring after ≥5 recorded "
+            "predictions (`MIN_PREDICTIONS_FOR_SCORE`; use 30+ for a less noisy production signal). The alert fires "
+            "when PSI stays **> 0.60 for 2 consecutive 1-minute evaluations** "
             "(`monitoring/grafana/provisioning/alerting/rules.yaml`, `for: 2m`) so a single noisy "
             "window doesn't page anyone.\n"
             "- **Where observed**:\n"
@@ -415,7 +578,7 @@ def render_monitoring():
             "optionally Slack via `contactpoints.yaml` (credentials are set in a local `.env`)"
         )
 
-    with st.expander("4. System/service health — details"):
+    with st.expander("5. System/service health — details"):
         st.markdown(
             "- **Where stored**: `http_requests_total` / `http_request_duration_seconds` "
             "(auto-instrumented), scraped into Prometheus's own time-series storage.\n"
@@ -426,14 +589,108 @@ def render_monitoring():
         )
 
     st.info(
-        "Rows 1, 3, 5, 6 have no code yet. If built, each would likely follow the same shape as "
-        "drift detection: a small in-process tracker module (like `drift.py`), a Prometheus gauge "
-        "wired into `src/api/main.py`, and a new rule in `rules.yaml`."
+        "Only prediction drift is currently calculated as an ML drift signal. "
+        "Prediction drift is not proof of concept drift: confirming concept or performance drift "
+        "requires delayed ground-truth labels. Open the Drift Types page for the distinctions and "
+        "the recommended response workflow."
     )
 
 
 # -------------------------------------------------------------------
-# 6. Plugins & Links
+# 6. Drift Types
+# -------------------------------------------------------------------
+def render_drift_types():
+    st.title("Drift Types")
+    st.caption(
+        "A practical guide to distribution changes, model degradation, and the signals "
+        "implemented in this project."
+    )
+
+    st.markdown("### What is model drift?")
+    st.write(
+        "Drift means that production data, predictions, or the relationship between inputs and "
+        "the correct outcome has changed compared with the model's reference period. A drift "
+        "signal is an investigation trigger; it does not automatically prove that the model is wrong."
+    )
+
+    st.markdown("### Main drift types")
+    st.markdown(
+        "| Drift type | What changes? | Rakuten example | How to detect it |\n"
+        "|---|---|---|---|\n"
+        "| **Data / input drift** (covariate shift) | Input distribution `P(X)` | Product-title "
+        "lengths, image brightness, language, or image embeddings change | PSI, KS test, "
+        "Jensen-Shannon distance, or embedding-distance monitoring |\n"
+        "| **Label drift** (prior-probability shift) | Class distribution `P(Y)` | The real share "
+        "of books, toys, and electronics changes | Compare delayed ground-truth label "
+        "distributions with the reference period |\n"
+        "| **Concept drift** | Relationship `P(Y given X)` | The same product characteristics now map "
+        "to a different `prdtypecode` because taxonomy or customer behavior changed | Join "
+        "predictions with new labels and monitor class-level accuracy, F1, and error patterns |\n"
+        "| ✅ **Prediction drift** | Model-output distribution `P(Ŷ)` | The API suddenly predicts "
+        "one `prdtypecode` much more frequently | Compare predicted-class distributions with PSI "
+        "or another distribution-distance metric |\n"
+        "| **Performance drift** | Quality metrics decline | Accuracy, macro-F1, calibration, or "
+        "top-3 accuracy falls below the accepted baseline | Evaluate labeled production samples "
+        "over rolling time windows |\n"
+        "| **Schema drift** | Data structure or contract | A column is renamed, an image field "
+        "changes type, or a required field disappears | Schema validation, contract tests, and "
+        "validation-failure metrics |\n"
+        "| **Data-quality drift** | Data validity or completeness | More empty descriptions, "
+        "corrupt images, duplicates, or out-of-range values | Missing-value, duplicate, range, "
+        "and parse-failure monitoring |"
+    )
+
+    left, right = st.columns(2)
+    with left:
+        with st.container(border=True):
+            st.markdown("#### Prediction drift ≠ concept drift")
+            st.write(
+                "Prediction drift can be measured immediately without labels. It may come from "
+                "real demand changes, input drift, model behavior, or a pipeline bug. Concept "
+                "drift can only be confirmed after ground-truth labels arrive."
+            )
+    with right:
+        with st.container(border=True):
+            st.markdown("#### Drift ≠ automatic retraining")
+            st.write(
+                "A high drift score should first trigger data and service checks. Retraining is "
+                "appropriate only when labeled evidence shows degradation and a candidate model "
+                "passes the validation and champion gates."
+            )
+
+    with st.expander("Current prediction-drift configuration", expanded=True):
+        st.markdown(
+            "- **Reference:** training class distribution in "
+            "`src/api/reference_class_distribution.json`\n"
+            "- **Live window:** latest 200 API predictions, held in memory\n"
+            "- **Demo minimum:** PSI starts after 5 predictions; use at least 30 in production\n"
+            "- **Alert:** `prediction_drift_psi > 0.60` for two minutes\n"
+            "- **Metrics:** `prediction_drift_psi` and `prediction_drift_window_size` in "
+            "Prometheus; dashboard and alert in Grafana\n"
+            "- **Limitation:** the live window resets when the API process restarts"
+        )
+
+    st.markdown("### Recommended response workflow")
+    st.code(
+        "Drift signal\n"
+        "  → validate schema, data quality, and service health\n"
+        "  → identify affected classes, features, and time window\n"
+        "  → collect delayed ground-truth labels\n"
+        "  → measure champion performance\n"
+        "      → performance is stable: document and continue monitoring\n"
+        "      → performance degraded: train a candidate model\n"
+        "          → validation + MLflow champion gate\n"
+        "              → promote only if the candidate passes",
+        language="text",
+    )
+    st.warning(
+        "Do not launch automatic retraining from PSI alone. A PSI alert is an early-warning "
+        "signal, not evidence that the current champion has lost accuracy."
+    )
+
+
+# -------------------------------------------------------------------
+# 7. Plugins & Links
 # -------------------------------------------------------------------
 _LINKS = [
     ("MLflow", "mlflow", "http://localhost:5001", "Experiment tracking + Model Registry"),

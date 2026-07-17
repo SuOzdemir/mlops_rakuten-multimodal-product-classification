@@ -9,6 +9,7 @@ from PIL import Image
 
 from project_story import (
     render_data_training,
+    render_drift_types,
     render_links,
     render_monitoring,
     render_orchestration,
@@ -104,12 +105,38 @@ def api_predict(token: str, designation: str, description: str, image: Image.Ima
         return None
 
 
-def api_retrain(token: str, model: str, epochs: int) -> dict | None:
+def api_retrain(
+    token: str,
+    model: str,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    seed: int,
+    early_stopping_patience: int,
+    weight_decay: float,
+    use_amp: bool,
+    label_smoothing: float | None = None,
+    dropout: float | None = None,
+) -> dict | None:
     try:
+        payload = {
+            "model": model,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "seed": seed,
+            "early_stopping_patience": early_stopping_patience,
+            "weight_decay": weight_decay,
+            "use_amp": use_amp,
+        }
+        if label_smoothing is not None:
+            payload["label_smoothing"] = label_smoothing
+        if dropout is not None:
+            payload["dropout"] = dropout
         resp = requests.post(
             f"{API_URL}/retrain",
             headers={"Authorization": f"Bearer {token}"},
-            data={"model": model, "epochs": epochs},
+            data=payload,
             timeout=15,
         )
         if resp.status_code == 200:
@@ -273,6 +300,7 @@ def render_prediction():
         "Tracking & Versioning",
         "Orchestration & Deployment",
         "Monitoring",
+        "Drift Types",
     ]
     pages = (
         story_pages
@@ -296,6 +324,7 @@ def render_prediction():
         "Tracking & Versioning": render_tracking,
         "Orchestration & Deployment": render_orchestration,
         "Monitoring": render_monitoring,
+        "Drift Types": render_drift_types,
         "Plugins & Links": render_links,
     }
     if page in story_renderers:
@@ -439,21 +468,194 @@ def render_retrain():
     if "retrain_job_id" not in st.session_state:
         st.session_state.retrain_job_id = None
 
+    model = st.selectbox(
+        "Model",
+        ["image", "text"],
+        format_func=lambda m: {
+            "image": "Image — ConvNeXt-Base (I12)",
+            "text": "Text — CamemBERT (T8)",
+        }[m],
+        key="retrain_model",
+    )
+    defaults = {
+        "image": {
+            "architecture": "ConvNeXt-Base",
+            "input_shape": 224,
+            "input_label": "Image size",
+            "feature_dim": 1024,
+            "batch_size": 16,
+            "learning_rate": 5e-5,
+            "seed": 42,
+            "early_stopping_patience": 6,
+            "weight_decay": 0.05,
+            "use_amp": True,
+            "label_smoothing": 0.1,
+            "dropout": 0.5,
+        },
+        "text": {
+            "architecture": "CamemBERT-base",
+            "input_shape": 128,
+            "input_label": "Max token length",
+            "feature_dim": 768,
+            "batch_size": 32,
+            "learning_rate": 2e-5,
+            "seed": 42,
+            "early_stopping_patience": 3,
+            "weight_decay": 0.01,
+            "use_amp": True,
+        },
+    }[model]
+
     with st.form("retrain_form"):
-        model = st.selectbox("Model", ["image", "text"], format_func=lambda m: {"image": "Image — ConvNeXt-Base (I12)", "text": "Text — CamemBERT (T8)"}[m])
-        epochs = st.number_input(
-            "Epochs",
-            min_value=1,
-            max_value=50,
-            value=3,
-            step=1,
-            help="Maximum training epochs. Early stopping may finish the run sooner.",
-        )
+        fixed_arch, fixed_input, fixed_feature = st.columns(3)
+        with fixed_arch:
+            st.text_input(
+                "Architecture",
+                value=defaults["architecture"],
+                disabled=True,
+                help="Fixed because the checkpoint and production serving code depend on this architecture.",
+            )
+        with fixed_input:
+            st.number_input(
+                defaults["input_label"],
+                value=defaults["input_shape"],
+                disabled=True,
+                help="Fixed to match preprocessing and production serving.",
+            )
+        with fixed_feature:
+            st.number_input(
+                "Feature dimension",
+                value=defaults["feature_dim"],
+                disabled=True,
+                help="Fixed by the selected pretrained architecture.",
+            )
+
+        st.markdown("#### Core training parameters")
+        epoch_col, batch_col, lr_col = st.columns(3)
+        with epoch_col:
+            epochs = st.number_input(
+                "Epochs",
+                min_value=1,
+                max_value=50,
+                value=3,
+                step=1,
+                help="Maximum training epochs. Early stopping may finish the run sooner.",
+            )
+        with batch_col:
+            batch_size = st.number_input(
+                "Batch size",
+                min_value=1,
+                max_value=32,
+                value=defaults["batch_size"],
+                step=1,
+                key=f"retrain_batch_size_{model}",
+                help="Larger batches use more memory. ConvNeXt-Base defaults to 16; CamemBERT defaults to 32.",
+            )
+        with lr_col:
+            learning_rate = st.number_input(
+                "Head learning rate" if model == "image" else "Learning rate",
+                min_value=1e-7,
+                max_value=1e-2,
+                value=defaults["learning_rate"],
+                step=1e-6,
+                format="%.7f",
+                key=f"retrain_learning_rate_{model}",
+                help=(
+                    "For CamemBERT this is the optimizer LR. For ConvNeXt this is "
+                    "the classifier-head LR; the backbone uses LR / 10."
+                ),
+            )
+        if model == "image":
+            st.caption(
+                "Derived parameter: **Backbone learning rate = Head learning rate / 10** "
+                f"(default: `{defaults['learning_rate'] / 10:g}`)."
+            )
+
+        with st.expander("Advanced hyperparameters", expanded=True):
+            seed_col, patience_col = st.columns(2)
+            with seed_col:
+                seed = st.number_input(
+                    "Random seed",
+                    min_value=0,
+                    max_value=2_147_483_647,
+                    value=defaults["seed"],
+                    step=1,
+                    key=f"retrain_seed_{model}",
+                )
+            with patience_col:
+                early_stopping_patience = st.number_input(
+                    "Early-stopping patience",
+                    min_value=1,
+                    max_value=50,
+                    value=defaults["early_stopping_patience"],
+                    step=1,
+                    key=f"retrain_patience_{model}",
+                )
+
+            decay_col, amp_col = st.columns(2)
+            with decay_col:
+                weight_decay = st.number_input(
+                    "Weight decay",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=defaults["weight_decay"],
+                    step=0.001,
+                    format="%.4f",
+                    key=f"retrain_weight_decay_{model}",
+                )
+            with amp_col:
+                use_amp = st.checkbox(
+                    "Use mixed precision (AMP)",
+                    value=defaults["use_amp"],
+                    key=f"retrain_use_amp_{model}",
+                    help="Used only when CUDA is available; CPU training remains full precision.",
+                )
+
+            label_smoothing = None
+            dropout = None
+            if model == "image":
+                smoothing_col, dropout_col = st.columns(2)
+                with smoothing_col:
+                    label_smoothing = st.number_input(
+                        "Label smoothing",
+                        min_value=0.0,
+                        max_value=0.5,
+                        value=defaults["label_smoothing"],
+                        step=0.01,
+                        format="%.2f",
+                        key="retrain_label_smoothing_image",
+                    )
+                with dropout_col:
+                    dropout = st.number_input(
+                        "Classifier dropout",
+                        min_value=0.0,
+                        max_value=0.9,
+                        value=defaults["dropout"],
+                        step=0.05,
+                        format="%.2f",
+                        key="retrain_dropout_image",
+                    )
         submitted = st.form_submit_button("Start Retrain", use_container_width=True)
 
     if submitted:
         with st.spinner("Triggering Airflow DAG..."):
-            job = api_retrain(st.session_state["token"], model=model, epochs=int(epochs))
+            job = api_retrain(
+                st.session_state["token"],
+                model=model,
+                epochs=int(epochs),
+                batch_size=int(batch_size),
+                learning_rate=float(learning_rate),
+                seed=int(seed),
+                early_stopping_patience=int(early_stopping_patience),
+                weight_decay=float(weight_decay),
+                use_amp=bool(use_amp),
+                label_smoothing=(
+                    float(label_smoothing)
+                    if label_smoothing is not None
+                    else None
+                ),
+                dropout=float(dropout) if dropout is not None else None,
+            )
         if job:
             st.session_state.retrain_job_id = job["job_id"]
             st.success(f"Job started: `{job['job_id']}`")
@@ -471,7 +673,14 @@ def render_retrain():
         job = api_retrain_status(st.session_state["token"], st.session_state.retrain_job_id)
         if job:
             emoji = STATUS_COLOR.get(job["status"], "⚪")
-            st.markdown(f"**Status:** {emoji} {job['status']}  |  **Model:** {job['model']}  |  **Epochs:** {job.get('epochs', '-')}  |  **Started:** {job.get('started_at') or '-'}")
+            st.markdown(
+                f"**Status:** {emoji} {job['status']}  |  "
+                f"**Model:** {job['model']}  |  "
+                f"**Epochs:** {job.get('epochs', '-')}  |  "
+                f"**Batch:** {job.get('batch_size', '-')}  |  "
+                f"**LR:** {job.get('learning_rate', '-')}  |  "
+                f"**Started:** {job.get('started_at') or '-'}"
+            )
         else:
             st.warning("Could not fetch job status (Airflow unreachable or job not found).")
 

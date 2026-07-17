@@ -46,8 +46,18 @@ MAX_LENGTH  = 128         # Token sequence length
 BATCH_SIZE  = 32
 NUM_WORKERS = 4
 
+if os.environ.get("SEED_OVERRIDE"):
+    SEED = int(os.environ["SEED_OVERRIDE"])
+if os.environ.get("BATCH_SIZE_OVERRIDE"):
+    BATCH_SIZE = int(os.environ["BATCH_SIZE_OVERRIDE"])
+
 MAX_EPOCHS             = 10
 EARLY_STOPPING_PATIENCE = 3   # Text models converge faster than image models
+
+if os.environ.get("EARLY_STOPPING_PATIENCE_OVERRIDE"):
+    EARLY_STOPPING_PATIENCE = int(
+        os.environ["EARLY_STOPPING_PATIENCE_OVERRIDE"]
+    )
 
 # MAX_EPOCHS_OVERRIDE bounds epoch count for a real (non-subsampled-model)
 # sanity run without waiting hours -- e.g. a real single-epoch check.
@@ -63,6 +73,11 @@ VAL_ROWS_OVERRIDE = int(os.environ["VAL_ROWS_OVERRIDE"]) if os.environ.get("VAL_
 LEARNING_RATE = 2e-5
 WEIGHT_DECAY  = 0.01
 
+if os.environ.get("LEARNING_RATE_OVERRIDE"):
+    LEARNING_RATE = float(os.environ["LEARNING_RATE_OVERRIDE"])
+if os.environ.get("WEIGHT_DECAY_OVERRIDE"):
+    WEIGHT_DECAY = float(os.environ["WEIGHT_DECAY_OVERRIDE"])
+
 # Scheduler
 SCHEDULER_MODE     = "max"
 SCHEDULER_FACTOR   = 0.5
@@ -71,6 +86,11 @@ SCHEDULER_MIN_LR   = 1e-7
 
 # Mixed Precision Training (AMP)
 USE_AMP = True
+
+if os.environ.get("USE_AMP_OVERRIDE"):
+    USE_AMP = os.environ["USE_AMP_OVERRIDE"].lower() in {
+        "1", "true", "yes", "on",
+    }
 
 # ------------------------------------------------------------
 # Feature export  (for fusion models)

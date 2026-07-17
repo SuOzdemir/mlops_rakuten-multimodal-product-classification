@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1510" viewBox="0 0 2200 1510" role="img" aria-labelledby="title desc">
+  <title id="title">Rakuten MLOps retrain sonrası mimari akış</title>
+  <desc id="desc">Streamlit retrain isteğinden Airflow training ve promotion DAG'larına, DVC ve MLflow depolamasına, champion gate ve FastAPI hot reload'a uzanan mimari akış.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef2ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#059669"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#dc2626"/>
+    </marker>
+    <style>
+      .title{font:700 42px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#0f172a}
+      .subtitle{font:400 20px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#475569}
+      .lane-title{font:700 17px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:2px;fill:#334155}
+      .node-title{font:700 20px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#0f172a}
+      .node-text{font:400 16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#334155}
+      .small{font:500 14px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#475569}
+      .label{font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      .flow{fill:none;stroke:#475569;stroke-width:3;marker-end:url(#arrow)}
+      .flow-blue{fill:none;stroke:#2563eb;stroke-width:3;marker-end:url(#arrowBlue)}
+      .flow-green{fill:none;stroke:#059669;stroke-width:3;marker-end:url(#arrowGreen)}
+      .flow-red{fill:none;stroke:#dc2626;stroke-width:3;marker-end:url(#arrowRed)}
+      .dash{stroke-dasharray:9 8}
+    </style>
+  </defs>
+
+  <rect width="2200" height="1510" rx="28" fill="url(#bg)"/>
+  <text x="80" y="72" class="title">Retrain butonundan production serving’e</text>
+  <text x="80" y="108" class="subtitle">Gerçek kod akışı · Airflow orchestration · DVC checkpoint arşivi · MLflow Registry champion gate</text>
+
+  <!-- lane backgrounds -->
+  <rect x="55" y="145" width="2090" height="230" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="85" y="180" class="lane-title">01 · İSTEK VE ORKESTRASYON</text>
+
+  <rect x="55" y="405" width="2090" height="330" rx="24" fill="#fffbeb" stroke="#f59e0b" stroke-opacity=".42" stroke-width="2"/>
+  <text x="85" y="440" class="lane-title">02 · AIRFLOW TRAINING DAG</text>
+
+  <rect x="55" y="765" width="2090" height="390" rx="24" fill="#eff6ff" stroke="#3b82f6" stroke-opacity=".40" stroke-width="2"/>
+  <text x="85" y="800" class="lane-title">03 · AIRFLOW PROMOTION DAG</text>
+
+  <rect x="55" y="1185" width="2090" height="265" rx="24" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+  <text x="85" y="1220" class="lane-title">04 · GATE SONUCU VE SERVING</text>
+
+  <!-- top row -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="215" width="360" height="115" rx="18" fill="#ede9fe" stroke="#7c3aed" stroke-width="3"/>
+    <text x="120" y="250" class="node-title">Streamlit · Admin</text>
+    <text x="120" y="278" class="node-text">Start Retrain</text>
+    <text x="120" y="306" class="small">model · epochs · optimizer params</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="510" y="215" width="360" height="115" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
+    <text x="540" y="250" class="node-title">FastAPI · POST /retrain</text>
+    <text x="540" y="278" class="node-text">Admin auth + tek-job guard</text>
+    <text x="540" y="306" class="small">DVC repo-wide lock korunur</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="930" y="215" width="360" height="115" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>
+    <text x="960" y="250" class="node-title">Airflow REST API</text>
+    <text x="960" y="278" class="node-text">DAG run oluşturur</text>
+    <text x="960" y="306" class="small">retrain_&lt;model&gt;_&lt;id&gt;</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1350" y="215" width="420" height="115" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>
+    <text x="1380" y="250" class="node-title">rakuten_model_training</text>
+    <text x="1380" y="278" class="node-text">queued → running</text>
+    <text x="1380" y="306" class="small">UI status polling devam eder</text>
+  </g>
+  <g>
+    <rect x="1830" y="215" width="270" height="115" rx="18" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+    <text x="1860" y="250" class="node-title">Job zaten varsa</text>
+    <text x="1860" y="280" class="node-text">HTTP 409</text>
+    <text x="1860" y="306" class="small">ikinci retrain başlamaz</text>
+  </g>
+
+  <path d="M450 272 H510" class="flow-blue"/>
+  <path d="M870 272 H930" class="flow"/>
+  <path d="M1290 272 H1350" class="flow"/>
+  <path d="M870 240 C1110 150 1580 155 1830 240" class="flow-red dash"/>
+  <text x="1300" y="172" class="label" fill="#dc2626">başka retrain çalışıyorsa</text>
+
+  <!-- training row -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="490" width="340" height="150" rx="18" fill="#fff" stroke="#d97706" stroke-width="3"/>
+    <circle cx="125" cy="525" r="18" fill="#d97706"/>
+    <text x="119" y="531" font-family="sans-serif" font-weight="700" font-size="16" fill="#fff">1</text>
+    <text x="155" y="532" class="node-title">prepare_data</text>
+    <text x="120" y="570" class="small">dvc repro prepare_splits</text>
+    <text x="120" y="602" class="node-text">train/val CSV + label2id</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="480" y="490" width="340" height="150" rx="18" fill="#fff" stroke="#d97706" stroke-width="3"/>
+    <circle cx="515" cy="525" r="18" fill="#d97706"/>
+    <text x="509" y="531" font-family="sans-serif" font-weight="700" font-size="16" fill="#fff">2</text>
+    <text x="545" y="532" class="node-title">launch_trainer</text>
+    <text x="510" y="570" class="node-text">DockerOperator</text>
+    <text x="510" y="602" class="small">8 GB RAM · 2 GB /dev/shm</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="870" y="475" width="400" height="180" rx="18" fill="#e0f2fe" stroke="#0284c7" stroke-width="3"/>
+    <text x="900" y="515" class="node-title">Ephemeral trainer</text>
+    <text x="900" y="548" class="small">epochs · batch · LR overrides</text>
+    <text x="900" y="576" class="small">dvc repro train_&lt;model&gt;</text>
+    <text x="900" y="604" class="small">--force --single-item</text>
+    <text x="900" y="636" class="node-text">ConvNeXt veya CamemBERT</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1320" y="490" width="350" height="150" rx="18" fill="#e0f2fe" stroke="#0284c7" stroke-width="3"/>
+    <text x="1350" y="530" class="node-title">Yeni component çıktısı</text>
+    <text x="1350" y="565" class="node-text">best checkpoint</text>
+    <text x="1350" y="593" class="node-text">run_metadata.json</text>
+    <text x="1350" y="621" class="node-text">dvc.lock</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1720" y="490" width="380" height="150" rx="18" fill="#fff" stroke="#d97706" stroke-width="3"/>
+    <circle cx="1755" cy="525" r="18" fill="#d97706"/>
+    <text x="1749" y="531" font-family="sans-serif" font-weight="700" font-size="16" fill="#fff">3</text>
+    <text x="1785" y="532" class="node-title">trigger_promotion</text>
+    <text x="1750" y="570" class="node-text">Yalnızca training success</text>
+    <text x="1750" y="602" class="small">wait_for_completion=true</text>
+  </g>
+  <path d="M1560 330 V400 H260 V490" class="flow"/>
+  <path d="M430 565 H480" class="flow"/>
+  <path d="M820 565 H870" class="flow"/>
+  <path d="M1270 565 H1320" class="flow"/>
+  <path d="M1670 565 H1720" class="flow"/>
+
+  <!-- training persistence and failure -->
+  <rect x="485" y="665" width="515" height="48" rx="14" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="515" y="695" class="node-text">MLflow run: epoch metrics · params · plots</text>
+  <path d="M1010 655 V665" class="flow-green dash"/>
+  <rect x="1050" y="665" width="390" height="48" rx="14" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1080" y="695" class="node-text">MinIO · mlflow-artifacts</text>
+  <path d="M1000 689 H1050" class="flow-green"/>
+  <rect x="1490" y="665" width="360" height="48" rx="14" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1520" y="695" class="node-text">Postgres · mlflow metadata</text>
+  <path d="M1440 689 H1490" class="flow-green"/>
+  <rect x="1880" y="665" width="220" height="48" rx="14" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+  <text x="1905" y="695" class="node-text">Fail → promotion yok</text>
+  <path d="M1070 475 C1200 420 1900 430 1980 665" class="flow-red dash"/>
+
+  <!-- promotion row -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="850" width="330" height="145" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>
+    <text x="120" y="892" class="node-title">Promotion DAG</text>
+    <text x="120" y="927" class="node-text">Ephemeral container</text>
+    <text x="120" y="960" class="small">register_gate_and_deploy</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="470" y="830" width="390" height="185" rx="18" fill="#e0f2fe" stroke="#0284c7" stroke-width="3"/>
+    <text x="500" y="872" class="node-title">Asset doğrulama</text>
+    <text x="500" y="907" class="node-text">Image + Text checkpoints</text>
+    <text x="500" y="935" class="node-text">CamemBERT + tokenizer</text>
+    <text x="500" y="963" class="node-text">label map + category map</text>
+    <text x="500" y="992" class="small">Eksik asset → promotion failed</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="910" y="850" width="330" height="145" rx="18" fill="#e0f2fe" stroke="#0284c7" stroke-width="3"/>
+    <text x="940" y="892" class="node-title">DVC push</text>
+    <text x="940" y="927" class="small">dvc.yaml:train_&lt;model&gt;</text>
+    <text x="940" y="960" class="node-text">Seçilen checkpoint</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1290" y="830" width="360" height="185" rx="18" fill="#e0f2fe" stroke="#0284c7" stroke-width="3"/>
+    <text x="1320" y="872" class="node-title">Tam multimodal bundle</text>
+    <text x="1320" y="907" class="node-text">Image + Text</text>
+    <text x="1320" y="935" class="node-text">Tokenizer + mappings</text>
+    <text x="1320" y="968" class="small">serving_assets/</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1700" y="830" width="400" height="185" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="3"/>
+    <text x="1730" y="872" class="node-title">MLflow candidate version</text>
+    <text x="1730" y="907" class="small">rakuten-multimodal-classifier</text>
+    <text x="1730" y="940" class="node-text">Registry metadata → Postgres</text>
+    <text x="1730" y="968" class="node-text">Bundle → mlflow-artifacts</text>
+  </g>
+  <path d="M1910 640 V750 H255 V850" class="flow"/>
+  <path d="M420 922 H470" class="flow"/>
+  <path d="M860 922 H910" class="flow"/>
+  <path d="M1240 922 H1290" class="flow"/>
+  <path d="M1650 922 H1700" class="flow"/>
+
+  <rect x="900" y="1040" width="350" height="70" rx="16" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="930" y="1070" class="node-title">MinIO · dvc-data</text>
+  <text x="930" y="1096" class="small">hash-addressed checkpoint</text>
+  <path d="M1075 995 V1040" class="flow-green"/>
+
+  <path d="M1900 1015 V1040" class="flow"/>
+  <polygon points="1900,1040 2065,1095 1900,1150 1735,1095" fill="#fff7ed" stroke="#ea580c" stroke-width="3" filter="url(#shadow)"/>
+  <text x="1816" y="1087" class="node-title">Champion gate</text>
+  <text x="1782" y="1115" class="small">candidate F1 ≥ champion + min_gain?</text>
+
+  <!-- outcomes -->
+  <g filter="url(#shadow)">
+    <rect x="1000" y="1260" width="360" height="135" rx="18" fill="#fee2e2" stroke="#dc2626" stroke-width="3"/>
+    <text x="1030" y="1302" class="node-title">Candidate rejected</text>
+    <text x="1030" y="1336" class="node-text">Registry'de audit için kalır</text>
+    <text x="1030" y="1367" class="small">champion + API değişmez</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1420" y="1260" width="300" height="135" rx="18" fill="#d1fae5" stroke="#059669" stroke-width="3"/>
+    <text x="1450" y="1302" class="node-title">champion alias</text>
+    <text x="1450" y="1336" class="node-text">Yeni version</text>
+    <text x="1450" y="1367" class="small">gate passed</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1770" y="1245" width="350" height="165" rx="18" fill="#d1fae5" stroke="#059669" stroke-width="3"/>
+    <text x="1800" y="1285" class="node-title">Atomic deploy + hot reload</text>
+    <text x="1800" y="1318" class="node-text">champion bundle indirilir</text>
+    <text x="1800" y="1346" class="node-text">serving dizini değiştirilir</text>
+    <text x="1800" y="1374" class="small">manifest → sonraki predict</text>
+  </g>
+  <path d="M1810 1132 C1710 1190 1400 1190 1180 1260" class="flow-red"/>
+  <text x="1450" y="1194" class="label" fill="#dc2626">HAYIR</text>
+  <path d="M1980 1132 C1970 1190 1700 1195 1570 1260" class="flow-green"/>
+  <text x="1815" y="1194" class="label" fill="#059669">EVET</text>
+  <path d="M1720 1328 H1770" class="flow-green"/>
+
+  <text x="80" y="1480" class="subtitle">Kalıcı kaynaklar: Git/DVC metadata → GitHub · DVC objeleri → MinIO dvc-data · MLflow metadata → PostgreSQL · model/run artifact’ları → MinIO mlflow-artifacts</text>
+</svg>

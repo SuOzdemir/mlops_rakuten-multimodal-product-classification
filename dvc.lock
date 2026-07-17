@@ -42,8 +42,8 @@ stages:
       size: 16322
     - path: models/Model_I12_ConvNeXt_Base_ModerateAug_Full/utils.py
       hash: md5
-      md5: c953db135420c81e0520a855e0afbbae
-      size: 13810
+      md5: 63cd707014a9d076abcf6f93035c28d5
+      size: 14550
     - path: outputs/image_modeling/label2id.json
       hash: md5
       md5: 2c4ee652148136abed6e670fa20052bb
@@ -60,7 +60,7 @@ stages:
     - path: 
         models/Model_I12_ConvNeXt_Base_ModerateAug_Full/best_model_state_dict.pt
       hash: md5
-      md5: 0a1c39d505bae47898db9c598027e2b6
+      md5: c66f04f299ff446cbdea163492f6c3d9
       size: 350512075
   train_text:
     cmd: python -m 

@@ -33,8 +33,8 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0.25]
+                    params: [0.60]
         annotations:
-          summary: "PSI is {{ $values.A }} (threshold 0.25) -- live prediction distribution has significantly diverged from the training set."
+          summary: "PSI is {{ $values.A }} (alert threshold 0.60) -- live prediction distribution has significantly diverged from the training set."
         labels:
           severity: warning
