@@ -128,11 +128,14 @@ def main() -> None:
     # 4. Tokenizer & Model
     # ----------------------------------------------------------
     print(f"\nLoading tokenizer & model from: {config.LOCAL_MODEL_PATH}")
-    tokenizer = AutoTokenizer.from_pretrained(str(config.LOCAL_MODEL_PATH), use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(config.LOCAL_MODEL_PATH), use_fast=False, local_files_only=True
+    )
     model = CamembertForSequenceClassification.from_pretrained(
         str(config.LOCAL_MODEL_PATH),
         num_labels=num_classes,
         ignore_mismatched_sizes=True,  # LOCAL_MODEL_PATH's head is sized for 27 classes; reinit if num_classes differs
+        local_files_only=True,
     )
     model = model.to(device)
 

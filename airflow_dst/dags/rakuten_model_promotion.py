@@ -39,12 +39,16 @@ with DAG(
             "RAKUTEN_PROJECT_DIR": "/project",
             "CAMEMBERT_BASE_DIR": os.environ.get(
                 "CAMEMBERT_BASE_DIR",
-                "/project/data/rakuten_streamlit_predictor/text_model/camembert_run4",
+                "/project/data/camembert_base",
             ),
             "MLFLOW_TRACKING_URI": os.environ.get(
                 "MLFLOW_TRACKING_URI", "http://mlflow:5001"
             ),
             "DVC_ENDPOINT_URL": os.environ.get("DVC_ENDPOINT_URL", "http://minio:9000"),
+            # DVC S3-compatible remote (MinIO) needs these for authentication.
+            # Sourced from the main .env via Airflow's env_file.
+            "AWS_ACCESS_KEY_ID": os.environ.get("MINIO_ROOT_USER", ""),
+            "AWS_SECRET_ACCESS_KEY": os.environ.get("MINIO_ROOT_PASSWORD", ""),
             "PROMOTION_MIN_F1_GAIN": os.environ.get("PROMOTION_MIN_F1_GAIN", "0"),
             "PROMOTION_ALLOW_UNTAGGED_CHAMPION": os.environ.get(
                 "PROMOTION_ALLOW_UNTAGGED_CHAMPION", "false"

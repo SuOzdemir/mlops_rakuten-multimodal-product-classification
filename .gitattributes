@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must always use LF line endings so they work in Linux containers,
+# regardless of the developer's OS (Windows CRLF would break /bin/sh inside Docker).
+*.sh text eol=lf

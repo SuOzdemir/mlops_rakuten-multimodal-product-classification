@@ -1,6 +1,6 @@
 {
   "model_name": "I12_ConvNeXt_Base_ModerateAug_Full",
-  "best_macro_f1": 0.020302,
-  "best_epoch": 3,
-  "duration_min": 2.29
+  "best_macro_f1": 0.012516,
+  "best_epoch": 1,
+  "duration_min": 1.18
 }

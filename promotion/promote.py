@@ -13,7 +13,7 @@ PROJECT_DIR = Path(os.environ.get("RAKUTEN_PROJECT_DIR", "/project"))
 CAMEMBERT_BASE_DIR = Path(
     os.environ.get(
         "CAMEMBERT_BASE_DIR",
-        str(PROJECT_DIR / "data/rakuten_streamlit_predictor/text_model/camembert_run4"),
+        str(PROJECT_DIR / "data/camembert_base"),
     )
 )
 IMAGE_WEIGHTS_SRC = (

@@ -152,6 +152,10 @@ def rakuten_model_training():
         shm_size="2gb",
         environment={
             "MODEL": "{{ params.model }}",
+            "CAMEMBERT_BASE_DIR": os.environ.get(
+                "CAMEMBERT_BASE_DIR",
+                "/project/data/camembert_base",
+            ),
             "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5001"),
             "MLFLOW_REQUIRED": "true",
             "MAX_EPOCHS_OVERRIDE": "{{ params.epochs }}",

@@ -47,7 +47,9 @@ def main() -> None:
     str_label2id = {str(k): v for k, v in label2id.items()}
     val_df["label_id"] = val_df["prdtypecode"].astype(str).map(str_label2id)
 
-    tokenizer = AutoTokenizer.from_pretrained(str(config.LOCAL_MODEL_PATH), use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(config.LOCAL_MODEL_PATH), use_fast=False, local_files_only=True
+    )
 
     val_loader = DataLoader(
         RakutenTextDataset(val_df, tokenizer, config.MAX_LENGTH),
@@ -63,6 +65,7 @@ def main() -> None:
     model = CamembertForSequenceClassification.from_pretrained(
         str(config.LOCAL_MODEL_PATH),
         num_labels=len(label2id),
+        local_files_only=True,
     )
     model.load_state_dict(torch.load(config.BEST_WEIGHTS_LOCAL, map_location=device))
     model = model.to(device)
