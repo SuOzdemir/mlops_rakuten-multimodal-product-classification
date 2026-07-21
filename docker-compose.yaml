@@ -219,7 +219,7 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # Optional out-of-band drift monitor. It reads privacy-safe prediction
+  # Optional out-of-band input-data drift monitor. It reads privacy-safe input
   # features from PostgreSQL and never sits on the live prediction request
   # path. Start explicitly with `make evidently-up`; the existing in-memory
   # PSI -> Prometheus -> Grafana path remains unchanged.

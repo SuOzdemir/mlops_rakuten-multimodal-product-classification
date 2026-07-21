@@ -127,7 +127,7 @@
   <text x="618" y="462" class="body">
     <tspan x="618" dy="0">• Request, latency and error metrics</tspan>
     <tspan x="618" dy="22">• Live predicted-class PSI</tspan>
-    <tspan x="618" dy="22">• Evidently input + prediction drift</tspan>
+    <tspan x="618" dy="22">• Evidently input data drift</tspan>
     <tspan x="618" dy="22">• Provisioned dashboards and alerts</tspan>
   </text>
   <rect x="618" y="574" width="232" height="34" rx="9" fill="#ffffff" fill-opacity=".8"/>

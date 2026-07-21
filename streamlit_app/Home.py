@@ -799,7 +799,7 @@ def render_monitoring_page() -> None:
     with evidently_col:
         with st.container(border=True):
             st.markdown("#### Evidently")
-            st.write("Generates batch input- and prediction-drift reports.")
+            st.write("Generates batch input-data drift reports.")
             st.link_button(
                 "Open Evidently report →",
                 f"{EVIDENTLY_PUBLIC_URL}/reports/latest.html",
@@ -813,8 +813,7 @@ def render_monitoring_page() -> None:
         "| Request rate & latency (p50/p95) | FastAPI → Prometheus → Grafana | Metrics live, no alert rule yet |\n"
         "| 5xx error rate | FastAPI → Prometheus → Grafana | Metrics live, no alert rule yet |\n"
         "| **Live prediction drift (PSI)** | `drift.py` → Prometheus → Grafana | Predicted-category distribution; **alert: PSI > 0.60 for 2 min** |\n"
-        "| **Batch input / data drift** | Evidently → Prometheus → Grafana | Title length, description length and image availability |\n"
-        "| **Batch prediction drift** | Evidently → Prometheus → Grafana | Predicted-category distribution in the latest production window |"
+        "| **Batch input / data drift** | Evidently → Prometheus → Grafana | Title length, description length and image availability |"
     )
 
     drift_diagram_col, _ = st.columns([0.68, 0.32])

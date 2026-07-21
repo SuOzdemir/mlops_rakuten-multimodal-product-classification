@@ -425,6 +425,15 @@ _LINKS = [
     ("API docs (Swagger)", "swagger", "http://localhost:8000/docs", "Interactive FastAPI docs"),
 ]
 
+_SOURCE_LINKS = [
+    (
+        "GitHub Code",
+        "github",
+        "https://github.com/SuOzdemir/mlops_rakuten-multimodal-product-classification",
+        "Application code, workflows, DVC metadata, documentation, and infrastructure configuration.",
+    ),
+]
+
 
 def render_key_notes():
     st.title("Key Notes")
@@ -433,6 +442,24 @@ def render_key_notes():
     st.markdown("### Architectural decisions")
     for title, description in _ARCHITECTURAL_DECISIONS:
         st.markdown(f"- **{title}** — {description}")
+
+    source_columns = st.columns(len(_SOURCE_LINKS))
+    for column, (name, icon, url, description) in zip(source_columns, _SOURCE_LINKS):
+        with column:
+            st.markdown(
+                f"""
+                <a href="{escape(url)}" target="_blank" style="text-decoration:none;color:inherit;">
+                  <div style="border:1px solid #e2e8f0;border-radius:12px;padding:15px 16px;min-height:108px;">
+                    <div style="display:flex;align-items:center;gap:9px;font-weight:700;margin-bottom:7px;">
+                      <img src="https://cdn.simpleicons.org/{escape(icon)}" alt="" width="22" height="22">
+                      <span>{escape(name)}</span>
+                    </div>
+                    <div style="font-size:0.86rem;color:#6b7280;line-height:1.45;">{escape(description)}</div>
+                  </div>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
 
     st.markdown("### Artifact and package terminology")
     st.markdown(
@@ -445,10 +472,18 @@ def render_key_notes():
     )
 
     st.divider()
-    st.markdown("### Service links")
-    st.caption(
-        "The relevant service must be running through `make up`, `make up-all`, "
-        "or its optional profile command."
+    st.markdown("### Docker Desktop, Containers and Console Links")
+    st.markdown(
+        "**Available Make commands (23)**  \n"
+        "**Setup:** `make install` · `make setup-data` · `make prepare-splits`  \n"
+        "**Docker stack:** `make docker-up` · `make up` · `make serve` · "
+        "`make up-all` · `make down` · `make down-all` · `make restart-all` · "
+        "`make logs` · `make health`  \n"
+        "**Airflow:** `make airflow-up` · `make airflow-down` · `make airflow-logs`  \n"
+        "**Evidently:** `make evidently-up` · `make evidently-down` · `make evidently-logs`  \n"
+        "**Tests:** `make test`  \n"
+        "**Manual mode:** `make manual-up` · `make manual-down` · "
+        "`make manual-up-all` · `make manual-down-all`"
     )
     items = "".join(
         f'<li style="display:flex;align-items:center;gap:8px;margin:7px 0;">'

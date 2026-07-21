@@ -1,4 +1,4 @@
-"""Optional, out-of-band Evidently drift monitor.
+"""Optional, out-of-band Evidently input-data drift monitor.
 
 This service reads privacy-safe prediction features from PostgreSQL and never
 sits on FastAPI's request path. If it is stopped or unhealthy, live prediction,
@@ -7,7 +7,6 @@ the existing in-memory PSI metric, Prometheus, and Grafana continue to work.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -39,12 +38,6 @@ logger = logging.getLogger("evidently-monitor")
 DATABASE_URL = os.environ["DATABASE_URL"]
 REFERENCE_DATA_PATH = Path(
     os.environ.get("EVIDENTLY_REFERENCE_DATA", "/reference/train_split.csv")
-)
-REFERENCE_DISTRIBUTION_PATH = Path(
-    os.environ.get(
-        "EVIDENTLY_REFERENCE_DISTRIBUTION",
-        "/app/reference_class_distribution.json",
-    )
 )
 REPORT_DIR = Path(os.environ.get("EVIDENTLY_REPORT_DIR", "/reports"))
 INTERVAL_SECONDS = max(10, int(os.environ.get("EVIDENTLY_INTERVAL_SECONDS", "60")))
@@ -111,7 +104,6 @@ def _load_training_reference() -> tuple[pd.DataFrame, str]:
                 "designation",
                 "description",
                 "image_path_local",
-                "prdtypecode",
             ],
         )
         if len(reference) > REFERENCE_SAMPLE_SIZE:
@@ -121,7 +113,6 @@ def _load_training_reference() -> tuple[pd.DataFrame, str]:
             )
         prepared = pd.DataFrame(
             {
-                "prediction": reference["prdtypecode"].astype(str),
                 "designation_length": (
                     reference["designation"].fillna("").astype(str).str.strip().str.len()
                 ),
@@ -137,42 +128,23 @@ def _load_training_reference() -> tuple[pd.DataFrame, str]:
         ).astype(str)
         return prepared, str(REFERENCE_DATA_PATH)
 
-    distribution = json.loads(
-        REFERENCE_DISTRIBUTION_PATH.read_text(encoding="utf-8")
+    raise FileNotFoundError(
+        "Evidently input-drift reference is missing: "
+        f"{REFERENCE_DATA_PATH}. Prediction-class distribution is intentionally "
+        "not used as an input-data reference."
     )
-    rows: list[str] = []
-    allocations = {
-        code: int(float(share) * REFERENCE_SAMPLE_SIZE)
-        for code, share in distribution.items()
-    }
-    remainder = REFERENCE_SAMPLE_SIZE - sum(allocations.values())
-    ranked = sorted(
-        distribution,
-        key=lambda code: (
-            float(distribution[code]) * REFERENCE_SAMPLE_SIZE
-            - allocations[code]
-        ),
-        reverse=True,
-    )
-    for code in ranked[:remainder]:
-        allocations[code] += 1
-    for code, count in allocations.items():
-        rows.extend([str(code)] * count)
-    return pd.DataFrame({"prediction": rows}), str(REFERENCE_DISTRIBUTION_PATH)
 
 
 def _load_current_window() -> tuple[pd.DataFrame, int | None]:
     query = """
         SELECT
             id,
-            predicted_code,
             designation_length,
             description_length,
             has_image
         FROM (
             SELECT
                 id,
-                predicted_code,
                 designation_length,
                 description_length,
                 has_image,
@@ -185,7 +157,6 @@ def _load_current_window() -> tuple[pd.DataFrame, int | None]:
     """
     columns = [
         "id",
-        "predicted_code",
         "designation_length",
         "description_length",
         "has_image",
@@ -198,7 +169,6 @@ def _load_current_window() -> tuple[pd.DataFrame, int | None]:
         return current, None
     latest_event_id = int(current["id"].max())
     current = current.drop(columns=["id"])
-    current["prediction"] = current.pop("predicted_code").astype(str)
     current["has_image"] = current["has_image"].astype(str)
     return current, latest_event_id
 
@@ -228,7 +198,7 @@ def _as_evidently_dataset(frame: pd.DataFrame, columns: list[str]) -> Dataset:
     ]
     categorical = [
         column
-        for column in ("prediction", "has_image")
+        for column in ("has_image",)
         if column in columns
     ]
     return Dataset.from_pandas(
@@ -303,7 +273,6 @@ def run_evaluation() -> bool:
     columns = [
         column
         for column in (
-            "prediction",
             "designation_length",
             "description_length",
             "has_image",
