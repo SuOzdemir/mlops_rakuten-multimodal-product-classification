@@ -514,38 +514,10 @@ _MODEL_DEFAULTS = {
 }
 
 
-# ── page: Retrain Story ───────────────────────────────────────────────────────
+# ── page: Retraining Model ───────────────────────────────────────────────────
 
 def render_retrain_story() -> None:
     st.title("User Story: Retraining the Model")
-
-    with st.container(border=True):
-        st.markdown("#### The Situation")
-
-        psi = fetch_live_psi()
-        c1, c2, c3 = st.columns(3)
-
-        if psi is not None:
-            psi_delta = "above threshold (> 0.60)" if psi > 0.60 else "below threshold (≤ 0.60)"
-            psi_color = "inverse" if psi > 0.60 else "normal"
-            c1.metric("Live Prediction Drift (PSI)", f"{psi:.3f}", delta=psi_delta, delta_color=psi_color)
-        else:
-            c1.metric("Prediction Drift (PSI)", "—", delta="Make predictions to measure")
-
-        c2.metric("Drift window", "200 predictions", delta="rolling, in-memory")
-        c3.metric("Alert threshold", "PSI > 0.60", delta="2 consecutive minutes → Grafana alert")
-
-        st.write(
-            "A new wave of French product listings has shifted the category distribution "
-            "of incoming requests. The PSI alert in Grafana fired — an admin investigates "
-            "and decides to retrain the text model on fresh data."
-        )
-        st.caption(
-            "Tip: go to **Predict**, classify several products from a single category "
-            "repeatedly, then come back here to see the PSI update."
-        )
-
-    st.divider()
 
     st.markdown("#### Trigger Retraining")
 
@@ -768,6 +740,33 @@ def render_predict() -> None:
                     f"Confidence: {item['Confidence']}"
                 )
 
+    st.divider()
+    with st.container(border=True):
+        st.markdown("#### The Situation")
+
+        psi = fetch_live_psi()
+        c1, c2, c3 = st.columns(3)
+
+        if psi is not None:
+            psi_delta = "above threshold (> 0.60)" if psi > 0.60 else "below threshold (≤ 0.60)"
+            psi_color = "inverse" if psi > 0.60 else "normal"
+            c1.metric("Live Prediction Drift (PSI)", f"{psi:.3f}", delta=psi_delta, delta_color=psi_color)
+        else:
+            c1.metric("Prediction Drift (PSI)", "—", delta="Make predictions to measure")
+
+        c2.metric("Drift window", "200 predictions", delta="rolling, in-memory")
+        c3.metric("Alert threshold", "PSI > 0.60", delta="2 consecutive minutes → Grafana alert")
+
+        st.write(
+            "A new wave of French product listings has shifted the category distribution "
+            "of incoming requests. The PSI alert in Grafana fired — an admin investigates "
+            "and decides to retrain the text model on fresh data."
+        )
+        st.caption(
+            "Tip: classify several products from a single category repeatedly, then return "
+            "to this section to see the PSI update."
+        )
+
 
 # ── page: Monitoring ──────────────────────────────────────────────────────────
 
@@ -813,12 +812,12 @@ def render_monitoring_page() -> None:
         "|---|---|---|\n"
         "| Request rate & latency (p50/p95) | FastAPI → Prometheus → Grafana | Metrics live, no alert rule yet |\n"
         "| 5xx error rate | FastAPI → Prometheus → Grafana | Metrics live, no alert rule yet |\n"
-        "| **Prediction drift (PSI)** | `drift.py` → Prometheus → Grafana | **Active alert: PSI > 0.60 for 2 min** |\n"
-        "| Input + prediction drift | Evidently → Prometheus → Grafana | **Batch reports + active Evidently alerts** |\n"
-        "| Concept drift | Not built | Requires delayed ground-truth labels |"
+        "| **Live prediction drift (PSI)** | `drift.py` → Prometheus → Grafana | Predicted-category distribution; **alert: PSI > 0.60 for 2 min** |\n"
+        "| **Batch input / data drift** | Evidently → Prometheus → Grafana | Title length, description length and image availability |\n"
+        "| **Batch prediction drift** | Evidently → Prometheus → Grafana | Predicted-category distribution in the latest production window |"
     )
 
-    _, drift_diagram_col, _ = st.columns([0.16, 0.68, 0.16])
+    drift_diagram_col, _ = st.columns([0.68, 0.32])
     with drift_diagram_col:
         st.image(
             os.path.join(
@@ -831,11 +830,24 @@ def render_monitoring_page() -> None:
 
 # ── pages: Orchestration DAGs ─────────────────────────────────────────────────
 
+def _airflow_page_title(title: str) -> None:
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;gap:12px;margin:0 0 8px 0;">
+          <img src="https://cdn.simpleicons.org/apacheairflow/017CEE"
+               width="38" height="38" alt="Apache Airflow">
+          <h1 style="margin:0;padding:0;">{title}</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_orchestration_dag(view: str) -> None:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 
     if view == "train":
-        st.title("Training DAG")
+        _airflow_page_title("Training Airflow DAG")
         st.caption(
             "Airflow DAG 1: prepare shared data, train the selected component "
             "in an ephemeral container, then hand off to promotion."
@@ -856,32 +868,6 @@ def _render_orchestration_dag(view: str) -> None:
             ),
             width="stretch",
         )
-        minio_col, mlflow_col, postgres_col = st.columns(3)
-        with minio_col:
-            st.link_button(
-                "Open MinIO — artifact files",
-                MINIO_PUBLIC_URL,
-                width="stretch",
-            )
-        with mlflow_col:
-            st.link_button(
-                "Open MLflow — runs & metrics",
-                MLFLOW_PUBLIC_URL,
-                width="stretch",
-            )
-        with postgres_col:
-            st.link_button(
-                "Open PostgreSQL — Adminer",
-                ADMINER_PUBLIC_URL,
-                width="stretch",
-            )
-        st.caption(
-            "Adminer connection: server `postgres`, database `mlflow`, user "
-            "`mlflow`; password is `MLFLOW_DB_PASSWORD` from `.env`. Binary "
-            "artifacts are not stored in PostgreSQL—they are in MinIO's "
-            "`mlflow-artifacts` bucket."
-        )
-
         st.markdown("#### Where the 1,000-image demo subset is applied")
         st.info(
             "`prepare_data` creates the complete, reproducible stratified split; "
@@ -913,7 +899,7 @@ def _render_orchestration_dag(view: str) -> None:
         )
 
     elif view == "promote":
-        st.title("Promotion DAG")
+        _airflow_page_title("Promotion Airflow DAG")
         st.caption(
             "Airflow DAG 2: push the reproduced checkpoint, register and gate "
             "a complete candidate bundle, then deploy an accepted champion."
@@ -1045,7 +1031,7 @@ def render_login() -> None:
                     "username":  username,
                     "token":     result["access_token"],
                     "role":      result.get("role", "viewer"),
-                    "page":      "Retrain Story",
+                    "page":      "Retraining Model",
                 })
                 st.rerun()
             else:
@@ -1056,11 +1042,11 @@ def render_login() -> None:
 
 _NAV_SECTIONS = {
     "PROJECT CONTEXT": ["Overview", "Data & Training", "MLOps & Model Drift"],
-    "LIVE DEMO": ["Predict", "Monitoring", "Retrain Story"],
+    "LIVE DEMO": ["Predict", "Monitoring", "Retraining Model"],
     "ARCHITECTURE": ["Architectural Overview"],
-    "ORCHESTRATION": [
-        "Training DAG",
-        "Promotion DAG",
+    "AIRFLOW ORCHESTRATION": [
+        "Training Airflow DAG",
+        "Promotion Airflow DAG",
     ],
     "TECHNICAL DEEP DIVE": ["Key Notes"],
 }
@@ -1069,12 +1055,12 @@ _PAGE_RENDER = {
     "Overview":                render_overview,
     "Data & Training":         render_data_training,
     "MLOps & Model Drift":     render_drift_types,
-    "Retrain Story":           render_retrain_story,
+    "Retraining Model":        render_retrain_story,
     "Predict":                 render_predict,
     "Monitoring":              render_monitoring_page,
     "Architectural Overview": render_architecture,
-    "Training DAG":            render_training_dag,
-    "Promotion DAG":           render_promotion_dag,
+    "Training Airflow DAG":    render_training_dag,
+    "Promotion Airflow DAG":   render_promotion_dag,
     "Key Notes":               render_key_notes,
 }
 
@@ -1107,7 +1093,7 @@ def render_app() -> None:
     st.sidebar.divider()
 
     if "page" not in st.session_state:
-        st.session_state.page = "Retrain Story"
+        st.session_state.page = "Retraining Model"
     elif st.session_state.page == "Drift Types":
         st.session_state.page = "MLOps & Model Drift"
     elif st.session_state.page == "Architecture":
@@ -1116,10 +1102,16 @@ def render_app() -> None:
         st.session_state.page = "Key Notes"
     elif st.session_state.page == "System Health":
         st.session_state.page = "Monitoring"
+    elif st.session_state.page == "Retrain Story":
+        st.session_state.page = "Retraining Model"
     elif st.session_state.page == "Tracking & Versioning":
-        st.session_state.page = "Training DAG"
+        st.session_state.page = "Training Airflow DAG"
+    elif st.session_state.page == "Training DAG":
+        st.session_state.page = "Training Airflow DAG"
     elif st.session_state.page == "Promote · rakuten_model_promotion":
-        st.session_state.page = "Promotion DAG"
+        st.session_state.page = "Promotion Airflow DAG"
+    elif st.session_state.page == "Promotion DAG":
+        st.session_state.page = "Promotion Airflow DAG"
     elif st.session_state.page in {
         "Pipeline Diagrams",
         "Orchestration & Deployment",
@@ -1127,7 +1119,7 @@ def render_app() -> None:
     }:
         # Migrate sessions created before Train and Promote became separate
         # pages under the ORCHESTRATION sidebar parent.
-        st.session_state.page = "Training DAG"
+        st.session_state.page = "Training Airflow DAG"
 
     current = _sidebar_nav(st.session_state.page)
 
@@ -1135,7 +1127,7 @@ def render_app() -> None:
     if st.sidebar.button("Log out", use_container_width=True):
         api_logout(st.session_state.get("token", ""))
         st.session_state.update({
-            "logged_in": False, "username": "", "token": "", "role": "", "page": "Retrain Story",
+            "logged_in": False, "username": "", "token": "", "role": "", "page": "Retraining Model",
         })
         st.rerun()
 

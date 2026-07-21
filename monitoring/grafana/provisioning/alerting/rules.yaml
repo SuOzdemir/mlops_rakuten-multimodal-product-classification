@@ -7,7 +7,7 @@ groups:
     interval: 1m
     rules:
       - uid: prediction-drift-psi-alert
-        title: "Prediction drift (PSI) significant"
+        title: "Rakuten prediction drift (PSI)"
         condition: C
         # for: 2m -- PSI must stay above threshold for 2 consecutive
         # evaluations before firing, so a single noisy window doesn't alert.
@@ -38,9 +38,10 @@ groups:
           summary: "PSI is {{ $values.A }} (alert threshold 0.60) -- live prediction distribution has significantly diverged from the training set."
         labels:
           severity: warning
+          project: rakuten
 
       - uid: evidently-dataset-drift-share-alert
-        title: "Evidently dataset drift detected"
+        title: "Rakuten Evidently dataset drift"
         condition: C
         # Require two consecutive evaluations so a single short-lived report
         # does not immediately move the alert to Firing.
@@ -72,9 +73,10 @@ groups:
         labels:
           severity: warning
           monitor: evidently
+          project: rakuten
 
       - uid: evidently-column-psi-alert
-        title: "Evidently column PSI significant"
+        title: "Rakuten Evidently column PSI drift"
         condition: C
         # Prometheus returns one series per column. Grafana therefore creates
         # an independently evaluated alert instance for each column label.
@@ -106,3 +108,4 @@ groups:
         labels:
           severity: warning
           monitor: evidently
+          project: rakuten
