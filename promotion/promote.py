@@ -187,7 +187,10 @@ def promote() -> dict:
                 artifact_path="model",
                 python_model=RakutenMultimodalModel(),
                 artifacts={"serving_assets": str(bundle)},
-                code_paths=[str(PROJECT_DIR / "ml"), str(PROJECT_DIR / "streamlit_app")],
+                code_paths=[
+                    str(PROJECT_DIR / "ml"),
+                    str(PROJECT_DIR / "streamlit_app"),
+                ],
                 registered_model_name=REGISTERED_MODEL_NAME,
                 pip_requirements=[
                     "mlflow>=2.16.0", "torch", "torchvision", "transformers>=5.0.0",

@@ -39,6 +39,30 @@ def init_db() -> None:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prediction_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    predicted_code INTEGER NOT NULL,
+                    confidence DOUBLE PRECISION NOT NULL,
+                    designation_length INTEGER NOT NULL,
+                    description_length INTEGER NOT NULL,
+                    has_image BOOLEAN NOT NULL,
+                    image_width INTEGER,
+                    image_height INTEGER,
+                    prediction_mode TEXT NOT NULL,
+                    image_weight DOUBLE PRECISION NOT NULL,
+                    deployment_version TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS prediction_events_created_at_idx
+                ON prediction_events (created_at DESC)
+                """
+            )
             cur.execute("SELECT COUNT(*) FROM users")
             count = cur.fetchone()[0]
             if count == 0:
@@ -73,3 +97,54 @@ def get_user(username: str) -> dict | None:
 
 def verify_password(password: str, user: dict) -> bool:
     return _hash_password(password, user["salt"]) == user["password_hash"]
+
+
+def record_prediction_event(
+    *,
+    predicted_code: int,
+    confidence: float,
+    designation_length: int,
+    description_length: int,
+    has_image: bool,
+    image_width: int | None,
+    image_height: int | None,
+    prediction_mode: str,
+    image_weight: float,
+    deployment_version: str | None,
+) -> None:
+    """Persist privacy-safe monitoring features; raw text/images are never stored."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO prediction_events (
+                    predicted_code,
+                    confidence,
+                    designation_length,
+                    description_length,
+                    has_image,
+                    image_width,
+                    image_height,
+                    prediction_mode,
+                    image_weight,
+                    deployment_version
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    predicted_code,
+                    confidence,
+                    designation_length,
+                    description_length,
+                    has_image,
+                    image_width,
+                    image_height,
+                    prediction_mode,
+                    image_weight,
+                    deployment_version,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()

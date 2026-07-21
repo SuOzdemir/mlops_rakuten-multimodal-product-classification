@@ -1,12 +1,13 @@
 import io
 import json
+import logging
 import secrets
 import sys
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 from prometheus_client import Gauge, Histogram
@@ -16,7 +17,7 @@ from requests.exceptions import RequestException
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.api import drift
-from src.api.db import get_user, init_db, verify_password
+from src.api.db import get_user, init_db, record_prediction_event, verify_password
 from src.api.retrain import ModelName, get_status, list_jobs, start_retrain
 from streamlit_app.services.raw_late_fusion_predictor import load_assets, predict
 
@@ -24,6 +25,7 @@ _tokens: dict[str, dict[str, str]] = {}  # token → {"username":..., "role":...
 _assets = None
 _assets_deployment_id = None
 _assets_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 _deployment_manifest = (
     Path(__file__).resolve().parent.parent.parent
     / "data" / "rakuten_streamlit_predictor" / "deployment_manifest.json"
@@ -74,6 +76,14 @@ def _get_assets():
                 _assets = new_assets
                 _assets_deployment_id = deployment_id
     return _assets
+
+
+def _record_prediction_event_safely(**event) -> None:
+    """Monitoring is fail-open: its database write must never fail a prediction."""
+    try:
+        record_prediction_event(**event)
+    except Exception:
+        logger.exception("Could not persist prediction event for Evidently monitoring.")
 
 
 @asynccontextmanager
@@ -138,6 +148,7 @@ def logout(request: Request):
 @app.post("/predict")
 async def predict_endpoint(
     request: Request,
+    background_tasks: BackgroundTasks,
     image: UploadFile | None = File(None),
     designation: str = Form(""),
     description: str = Form(""),
@@ -177,6 +188,26 @@ async def predict_endpoint(
     # NaN (not 0.0) while the window is still warming up -- 0.0 would read as
     # "no drift", but really means "not enough predictions yet to say."
     PREDICTION_DRIFT_PSI.set(psi if psi is not None else float("nan"))
+
+    image_width, image_height = img.size if img is not None else (None, None)
+    deployment_version = (
+        str(_assets_deployment_id[0])
+        if _assets_deployment_id and _assets_deployment_id[0] is not None
+        else None
+    )
+    background_tasks.add_task(
+        _record_prediction_event_safely,
+        predicted_code=int(result["top3"][0]["prdtypecode"]),
+        confidence=float(result["top3"][0]["confidence_float"]) / 100.0,
+        designation_length=len(designation.strip()),
+        description_length=len(description.strip()),
+        has_image=img is not None,
+        image_width=image_width,
+        image_height=image_height,
+        prediction_mode=str(result["mode"]),
+        image_weight=float(result["image_weight"]),
+        deployment_version=deployment_version,
+    )
 
     return JSONResponse(content=result)
 

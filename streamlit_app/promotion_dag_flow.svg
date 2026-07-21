@@ -1,0 +1,211 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1400" viewBox="0 0 1600 1400" role="img" aria-labelledby="title description">
+  <title id="title">Rakuten retraining, promotion, and hot-reload flow</title>
+  <desc id="description">The request path, the three tasks of the training DAG, the promotion DAG Docker task, the champion gate, and the successful hot-reload deployment path.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <style>
+      .title { font-family: Arial, Helvetica, sans-serif; font-size: 34px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: Arial, Helvetica, sans-serif; font-size: 16px; fill: #64748b; }
+      .section { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 1.2px; }
+      .dag-title { font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: 700; fill: #1e293b; }
+      .dag-sub { font-family: Arial, Helvetica, sans-serif; font-size: 13px; fill: #64748b; }
+      .node-title { font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; fill: #0f172a; }
+      .node-sub { font-family: Arial, Helvetica, sans-serif; font-size: 12px; fill: #64748b; }
+      .light-title { font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; fill: #0f172a; }
+      .light-sub { font-family: Arial, Helvetica, sans-serif; font-size: 12px; fill: #64748b; }
+      .edge { font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 600; fill: #64748b; }
+      .step { font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .5px; }
+      .mono { font-family: Menlo, Consolas, monospace; font-size: 11px; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1400" rx="24" fill="#f0fdf4"/>
+  <text x="48" y="54" class="title">Retrain → Promotion → Champion Hot Reload</text>
+  <text x="48" y="82" class="subtitle">Actual Airflow task names and the decision logic implemented in this project</text>
+
+  <!-- REQUEST PATH -->
+  <rect x="40" y="108" width="1520" height="166" rx="18" fill="#ffffff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <rect x="62" y="126" width="152" height="28" rx="14" fill="#f8fafc"/>
+  <text x="138" y="145" text-anchor="middle" class="section" fill="#16a34a">RETRAIN REQUEST</text>
+
+  <rect x="72" y="174" width="230" height="72" rx="14" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="187" y="203" text-anchor="middle" class="node-title">Admin</text>
+  <text x="187" y="226" text-anchor="middle" class="node-sub">Select image/text + parameters</text>
+
+  <path d="M302 210 H358" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <rect x="364" y="174" width="260" height="72" rx="14" fill="#fdf4ff" stroke="#d946ef" stroke-width="2"/>
+  <text x="494" y="203" text-anchor="middle" class="light-title">Streamlit</text>
+  <text x="494" y="226" text-anchor="middle" class="light-sub">POST /retrain</text>
+
+  <path d="M624 210 H680" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <rect x="686" y="174" width="280" height="72" rx="14" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <text x="826" y="203" text-anchor="middle" class="light-title">FastAPI</text>
+  <text x="826" y="226" text-anchor="middle" class="light-sub">Admin auth · validate params · create job ID</text>
+
+  <path d="M966 210 H1022" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-blue)"/>
+  <text x="994" y="196" text-anchor="middle" class="edge">REST</text>
+
+  <rect x="1028" y="164" width="460" height="92" rx="14" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="1258" y="198" text-anchor="middle" class="light-title">Airflow REST API</text>
+  <text x="1258" y="221" text-anchor="middle" class="light-sub">Trigger DAG: rakuten_model_training</text>
+  <text x="1258" y="240" text-anchor="middle" class="light-sub">conf = model + epochs + batch size + LR + …</text>
+
+  <!-- TRAINING DAG -->
+  <rect x="40" y="300" width="1520" height="252" rx="18" fill="#ffffff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <rect x="62" y="320" width="204" height="28" rx="14" fill="#f8fafc"/>
+  <text x="164" y="339" text-anchor="middle" class="section" fill="#16a34a">AIRFLOW DAG 1</text>
+  <text x="290" y="341" class="dag-title">rakuten_model_training</text>
+  <text x="290" y="365" class="dag-sub">Three Airflow tasks run in order; promotion starts only after training succeeds.</text>
+
+  <rect x="72" y="402" width="380" height="118" rx="15" fill="#ecfdf5" stroke="#16a34a" stroke-width="5"/>
+  <rect x="88" y="416" width="76" height="22" rx="11" fill="#f8fafc"/>
+  <text x="126" y="431" text-anchor="middle" class="step" fill="#16a34a">TASK 1</text>
+  <text x="262" y="457" text-anchor="middle" class="node-title">prepare_data</text>
+  <text x="262" y="480" text-anchor="middle" class="mono">dvc repro prepare_splits</text>
+  <text x="262" y="502" text-anchor="middle" class="node-sub">Build shared train/validation CSVs + label map</text>
+
+  <path d="M452 461 H512" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-purple)"/>
+  <text x="482" y="448" text-anchor="middle" class="edge">success</text>
+
+  <rect x="518" y="390" width="466" height="142" rx="15" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <rect x="534" y="404" width="76" height="22" rx="11" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="572" y="419" text-anchor="middle" class="step" fill="#16a34a">TASK 2</text>
+  <text x="751" y="447" text-anchor="middle" class="light-title">launch_trainer · DockerOperator</text>
+  <text x="751" y="472" text-anchor="middle" class="light-sub">Start ephemeral trainer container</text>
+  <text x="751" y="494" text-anchor="middle" class="light-sub">dvc repro --force --single-item train_image | train_text</text>
+  <text x="751" y="516" text-anchor="middle" class="light-sub">Log MLflow run · save best checkpoint + best_macro_f1</text>
+
+  <path d="M984 461 H1044" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-purple)"/>
+  <text x="1014" y="448" text-anchor="middle" class="edge">success</text>
+
+  <rect x="1050" y="402" width="438" height="118" rx="15" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <rect x="1066" y="416" width="76" height="22" rx="11" fill="#f8fafc"/>
+  <text x="1104" y="431" text-anchor="middle" class="step" fill="#16a34a">TASK 3</text>
+  <text x="1269" y="457" text-anchor="middle" class="node-title">trigger_promotion</text>
+  <text x="1269" y="480" text-anchor="middle" class="node-sub">TriggerDagRunOperator · wait_for_completion=True</text>
+  <text x="1269" y="502" text-anchor="middle" class="node-sub">Starts rakuten_model_promotion with selected model</text>
+
+  <!-- PROMOTION DAG -->
+  <rect x="40" y="578" width="1520" height="468" rx="18" fill="#ffffff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <rect x="62" y="598" width="204" height="28" rx="14" fill="#f8fafc"/>
+  <text x="164" y="617" text-anchor="middle" class="section" fill="#16a34a">AIRFLOW DAG 2</text>
+  <text x="290" y="619" class="dag-title">rakuten_model_promotion</text>
+  <text x="290" y="643" class="dag-sub">One Airflow DockerOperator task; the boxes below are internal steps of the promotion container.</text>
+
+  <rect x="66" y="664" width="1468" height="348" rx="16" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 6"/>
+  <rect x="86" y="680" width="344" height="28" rx="14" fill="#faf5ff" stroke="#a855f7"/>
+  <text x="258" y="699" text-anchor="middle" class="section" fill="#7e22ce">TASK: register_gate_and_deploy</text>
+
+  <rect x="88" y="742" width="210" height="96" rx="14" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+  <text x="193" y="775" text-anchor="middle" class="node-title">1 · Validate assets</text>
+  <text x="193" y="798" text-anchor="middle" class="node-sub">Image + text checkpoints</text>
+  <text x="193" y="818" text-anchor="middle" class="node-sub">tokenizer + label/category maps</text>
+
+  <path d="M298 790 H338" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <rect x="344" y="742" width="210" height="96" rx="14" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+  <text x="449" y="775" text-anchor="middle" class="node-title">2 · Read metric</text>
+  <text x="449" y="798" text-anchor="middle" class="node-sub">image_best_macro_f1</text>
+  <text x="449" y="818" text-anchor="middle" class="node-sub">or text_best_macro_f1</text>
+
+  <path d="M554 790 H594" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <rect x="600" y="742" width="190" height="96" rx="14" fill="#ecfdf5" stroke="#16a34a" stroke-width="5"/>
+  <text x="695" y="775" text-anchor="middle" class="node-title">3 · DVC push</text>
+  <text x="695" y="798" text-anchor="middle" class="node-sub">Push retrained stage</text>
+  <text x="695" y="818" text-anchor="middle" class="node-sub">checkpoint → dvc-data</text>
+
+  <path d="M790 790 H830" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <rect x="836" y="730" width="226" height="120" rx="14" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="949" y="764" text-anchor="middle" class="node-title">4 · Build full bundle</text>
+  <text x="949" y="787" text-anchor="middle" class="node-sub">New component checkpoint</text>
+  <text x="949" y="807" text-anchor="middle" class="node-sub">+ other component checkpoint</text>
+  <text x="949" y="827" text-anchor="middle" class="node-sub">+ CamemBERT + tokenizer + maps</text>
+
+  <path d="M1062 790 H1102" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <rect x="1108" y="730" width="220" height="120" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="1218" y="764" text-anchor="middle" class="light-title">5 · MLflow candidate</text>
+  <text x="1218" y="787" text-anchor="middle" class="light-sub">Log production bundle run</text>
+  <text x="1218" y="807" text-anchor="middle" class="light-sub">Create Registry version</text>
+  <text x="1218" y="827" text-anchor="middle" class="light-sub">Attach metric + gate tags</text>
+
+  <path d="M1328 790 H1360" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <polygon points="1430,716 1510,790 1430,864 1350,790" fill="#f8fafc" stroke="#16a34a" stroke-width="2.5"/>
+  <text x="1430" y="772" text-anchor="middle" class="node-title">F1 gate</text>
+  <text x="1430" y="794" text-anchor="middle" class="node-sub">candidate ≥ champion</text>
+  <text x="1430" y="814" text-anchor="middle" class="node-sub">+ minimum gain?</text>
+
+  <path d="M1430 864 V900 H1260" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-red)"/>
+  <text x="1372" y="892" class="step" fill="#16a34a">FAIL</text>
+
+  <rect x="1000" y="876" width="254" height="102" rx="14" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <text x="1127" y="911" text-anchor="middle" class="node-title">Rejected version</text>
+  <text x="1127" y="934" text-anchor="middle" class="node-sub">deployment_status = rejected</text>
+  <text x="1127" y="954" text-anchor="middle" class="node-sub">Champion + serving bundle unchanged</text>
+
+  <path d="M1430 864 V996" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-green)"/>
+  <text x="1442" y="929" class="step" fill="#16a34a">PASS</text>
+
+  <!-- SUCCESSFUL DEPLOYMENT -->
+  <rect x="40" y="1072" width="1520" height="280" rx="18" fill="#ffffff" stroke="#bbf7d0" filter="url(#shadow)"/>
+  <rect x="62" y="1092" width="236" height="28" rx="14" fill="#f8fafc"/>
+  <text x="180" y="1111" text-anchor="middle" class="section" fill="#16a34a">SUCCESSFUL DEPLOYMENT</text>
+  <text x="322" y="1113" class="dag-sub">No API container restart</text>
+
+  <rect x="70" y="1160" width="250" height="116" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="195" y="1195" text-anchor="middle" class="light-title">6 · Move champion alias</text>
+  <text x="195" y="1219" text-anchor="middle" class="light-sub">champion → candidate version</text>
+  <text x="195" y="1242" text-anchor="middle" class="light-sub">deployment_status = production</text>
+
+  <path d="M320 1218 H364" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-green)"/>
+
+  <rect x="370" y="1160" width="250" height="116" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="495" y="1195" text-anchor="middle" class="light-title">7 · Download bundle</text>
+  <text x="495" y="1219" text-anchor="middle" class="light-sub">models:/…@champion</text>
+  <text x="495" y="1242" text-anchor="middle" class="light-sub">from MLflow artifacts / MinIO</text>
+
+  <path d="M620 1218 H664" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-green)"/>
+
+  <rect x="670" y="1160" width="250" height="116" rx="14" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="795" y="1195" text-anchor="middle" class="light-title">8 · Atomic directory swap</text>
+  <text x="795" y="1219" text-anchor="middle" class="light-sub">data/rakuten_streamlit_predictor/</text>
+  <text x="795" y="1242" text-anchor="middle" class="light-sub">Old bundle replaced as one unit</text>
+
+  <path d="M920 1218 H964" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-green)"/>
+
+  <rect x="970" y="1160" width="250" height="116" rx="14" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+  <text x="1095" y="1195" text-anchor="middle" class="light-title">9 · Write manifest</text>
+  <text x="1095" y="1219" text-anchor="middle" class="light-sub">version + run_id</text>
+  <text x="1095" y="1242" text-anchor="middle" class="light-sub">deployment_manifest.json</text>
+
+  <path d="M1220 1218 H1264" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#arrow-green)"/>
+
+  <rect x="1270" y="1144" width="262" height="148" rx="14" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <text x="1401" y="1182" text-anchor="middle" class="light-title">10 · Hot reload</text>
+  <text x="1401" y="1206" text-anchor="middle" class="light-sub">Next POST /predict reads manifest</text>
+  <text x="1401" y="1228" text-anchor="middle" class="light-sub">version/run_id changed → load_assets()</text>
+  <text x="1401" y="1250" text-anchor="middle" class="light-sub">New model becomes active in memory</text>
+  <rect x="1322" y="1264" width="158" height="20" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="1401" y="1278" text-anchor="middle" class="step" fill="#16a34a">NO RESTART</text>
+
+  <text x="800" y="1380" text-anchor="middle" class="node-sub">Source of truth: airflow_dst/dags/*.py · promotion/promote.py · src/api/main.py</text>
+</svg>

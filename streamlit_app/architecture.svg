@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title description">
+  <title id="title">Rakuten MLOps capability overview</title>
+  <desc id="description">Eight explanatory capability cards covering serving, multimodal inference, retraining, experiment tracking, versioning, promotion, monitoring, and CI with container publishing.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+    <style>
+      .eyebrow { font: 700 12px Inter, Arial, sans-serif; letter-spacing: 1.4px; fill: #15803d; }
+      .heading { font: 800 25px Inter, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 14px Inter, Arial, sans-serif; fill: #64748b; }
+      .card-title { font: 750 17px Inter, Arial, sans-serif; fill: #0f172a; }
+      .tool { font: 700 11px Inter, Arial, sans-serif; fill: #475569; letter-spacing: .35px; }
+      .body { font: 500 12.5px Inter, Arial, sans-serif; fill: #475569; }
+      .value { font: 700 12px Inter, Arial, sans-serif; fill: #166534; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="660" rx="24" fill="#f4fbf6"/>
+  <text x="34" y="34" class="eyebrow">RAKUTEN MLOPS PLATFORM</text>
+  <text x="34" y="65" class="heading">Architectural Capability Overview</text>
+  <text x="1166" y="60" text-anchor="end" class="subtitle">What the platform provides — not a request sequence</text>
+
+  <!-- 1. Experience and serving -->
+  <g filter="url(#shadow)">
+    <rect x="32" y="94" width="268" height="248" rx="17" fill="#fdf4ff" stroke="#e9d5ff" stroke-width="1.5"/>
+  </g>
+  <rect x="50" y="112" width="116" height="24" rx="8" fill="#fae8ff"/>
+  <text x="108" y="128" text-anchor="middle" class="tool">STREAMLIT · API</text>
+  <text x="50" y="164" class="card-title">Experience &amp; API Surface</text>
+  <text x="50" y="190" class="body">
+    <tspan x="50" dy="0">• Authenticated Streamlit interface</tspan>
+    <tspan x="50" dy="22">• Authentication and prediction APIs</tspan>
+    <tspan x="50" dy="22">• Admin retraining control API</tspan>
+    <tspan x="50" dy="22">• Health and Prometheus metrics APIs</tspan>
+  </text>
+  <rect x="50" y="302" width="232" height="25" rx="8" fill="#ffffff" fill-opacity=".8"/>
+  <text x="166" y="319" text-anchor="middle" class="value">Always-on production interface</text>
+
+  <!-- 2. Multimodal inference -->
+  <g filter="url(#shadow)">
+    <rect x="316" y="94" width="268" height="248" rx="17" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+  </g>
+  <rect x="334" y="112" width="165" height="24" rx="8" fill="#dbeafe"/>
+  <text x="416.5" y="128" text-anchor="middle" class="tool">PYTORCH · TRANSFORMERS</text>
+  <text x="334" y="164" class="card-title">Multimodal Inference</text>
+  <text x="334" y="190" class="body">
+    <tspan x="334" dy="0">• ConvNeXt image component</tspan>
+    <tspan x="334" dy="22">• CamemBERT text component</tspan>
+    <tspan x="334" dy="22">• Configurable weighted late fusion</tspan>
+    <tspan x="334" dy="22">• Single-modality fallback</tspan>
+  </text>
+  <rect x="334" y="302" width="232" height="25" rx="8" fill="#ffffff" fill-opacity=".8"/>
+  <text x="450" y="319" text-anchor="middle" class="value">One complete serving bundle</text>
+
+  <!-- 3. Training orchestration -->
+  <g filter="url(#shadow)">
+    <rect x="600" y="94" width="268" height="248" rx="17" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1.5"/>
+  </g>
+  <rect x="618" y="112" width="150" height="24" rx="8" fill="#ede9fe"/>
+  <text x="693" y="128" text-anchor="middle" class="tool">AIRFLOW · DOCKER</text>
+  <text x="618" y="164" class="card-title">Training Orchestration</text>
+  <text x="618" y="190" class="body">
+    <tspan x="618" dy="0">• FastAPI triggers Airflow through REST</tspan>
+    <tspan x="618" dy="22">• Configurable epochs, batch size and LR</tspan>
+    <tspan x="618" dy="22">• Short-lived isolated trainer container</tspan>
+    <tspan x="618" dy="22">• Training DAG then triggers promotion DAG</tspan>
+  </text>
+  <rect x="618" y="302" width="232" height="25" rx="8" fill="#ffffff" fill-opacity=".8"/>
+  <text x="734" y="319" text-anchor="middle" class="value">Serving stays available during training</text>
+
+  <!-- 4. Experiment tracking -->
+  <g filter="url(#shadow)">
+    <rect x="884" y="94" width="284" height="248" rx="17" fill="#ecfeff" stroke="#a5f3fc" stroke-width="1.5"/>
+  </g>
+  <rect x="902" y="112" width="177" height="24" rx="8" fill="#cffafe"/>
+  <text x="990.5" y="128" text-anchor="middle" class="tool">MLFLOW · POSTGRES · MINIO</text>
+  <text x="902" y="164" class="card-title">Experiment Tracking</text>
+  <text x="902" y="190" class="body">
+    <tspan x="902" dy="0">• Hyperparameters and epoch metrics</tspan>
+    <tspan x="902" dy="22">• Macro-F1 model selection</tspan>
+    <tspan x="902" dy="22">• Curves, summaries and model artifacts</tspan>
+    <tspan x="902" dy="22">• Searchable run history</tspan>
+  </text>
+  <rect x="902" y="302" width="248" height="25" rx="8" fill="#ffffff" fill-opacity=".8"/>
+  <text x="1026" y="319" text-anchor="middle" class="value">Auditable experiments and artifacts</text>
+
+  <!-- 5. Versioning and storage -->
+  <g filter="url(#shadow)">
+    <rect x="32" y="366" width="268" height="260" rx="17" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5"/>
+  </g>
+  <rect x="50" y="384" width="157" height="24" rx="8" fill="#ffedd5"/>
+  <text x="128.5" y="400" text-anchor="middle" class="tool">GIT · DVC · MINIO</text>
+  <text x="50" y="436" class="card-title">Versioning &amp; Storage</text>
+  <text x="50" y="462" class="body">
+    <tspan x="50" dy="0">• Git versions code and DVC metadata</tspan>
+    <tspan x="50" dy="22">• DVC hashes splits and checkpoints</tspan>
+    <tspan x="50" dy="22">• MinIO dvc-data stores large objects</tspan>
+    <tspan x="50" dy="22">• Dependency-aware reproducibility</tspan>
+  </text>
+  <rect x="50" y="574" width="232" height="34" rx="9" fill="#ffffff" fill-opacity=".8"/>
+  <text x="166" y="596" text-anchor="middle" class="value">Traceable data and model inputs</text>
+
+  <!-- 6. Safe promotion -->
+  <g filter="url(#shadow)">
+    <rect x="316" y="366" width="268" height="260" rx="17" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5"/>
+  </g>
+  <rect x="334" y="384" width="174" height="24" rx="8" fill="#dcfce7"/>
+  <text x="421" y="400" text-anchor="middle" class="tool">MLFLOW REGISTRY · API</text>
+  <text x="334" y="436" class="card-title">Safe Promotion &amp; Deployment</text>
+  <text x="334" y="462" class="body">
+    <tspan x="334" dy="0">• Candidate versus champion Macro-F1</tspan>
+    <tspan x="334" dy="22">• Rejected versions retained for audit</tspan>
+    <tspan x="334" dy="22">• Champion alias controls production</tspan>
+    <tspan x="334" dy="22">• Atomic bundle install and hot reload</tspan>
+  </text>
+  <rect x="334" y="574" width="232" height="34" rx="9" fill="#ffffff" fill-opacity=".8"/>
+  <text x="450" y="596" text-anchor="middle" class="value">Regression-resistant model release</text>
+
+  <!-- 7. Monitoring and drift -->
+  <g filter="url(#shadow)">
+    <rect x="600" y="366" width="268" height="260" rx="17" fill="#fefce8" stroke="#fef08a" stroke-width="1.5"/>
+  </g>
+  <rect x="618" y="384" width="196" height="24" rx="8" fill="#fef9c3"/>
+  <text x="716" y="400" text-anchor="middle" class="tool">PROMETHEUS · GRAFANA</text>
+  <text x="618" y="436" class="card-title">Monitoring &amp; Drift</text>
+  <text x="618" y="462" class="body">
+    <tspan x="618" dy="0">• Request, latency and error metrics</tspan>
+    <tspan x="618" dy="22">• Live predicted-class PSI</tspan>
+    <tspan x="618" dy="22">• Evidently input + prediction drift</tspan>
+    <tspan x="618" dy="22">• Provisioned dashboards and alerts</tspan>
+  </text>
+  <rect x="618" y="574" width="232" height="34" rx="9" fill="#ffffff" fill-opacity=".8"/>
+  <text x="734" y="596" text-anchor="middle" class="value">Non-blocking operational visibility</text>
+
+  <!-- 8. CI and container registry -->
+  <g filter="url(#shadow)">
+    <rect x="884" y="366" width="284" height="260" rx="17" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  </g>
+  <rect x="902" y="384" width="184" height="24" rx="8" fill="#e2e8f0"/>
+  <text x="994" y="400" text-anchor="middle" class="tool">GITHUB ACTIONS · GHCR</text>
+  <text x="902" y="436" class="card-title">CI &amp; Container Registry</text>
+  <text x="902" y="462" class="body">
+    <tspan x="902" dy="0">• Automated tests on pull requests</tspan>
+    <tspan x="902" dy="22">• Six service images built after tests</tspan>
+    <tspan x="902" dy="22">• Main images published with SHA tags</tspan>
+    <tspan x="902" dy="22">• GHCR stores images; no auto-deployment</tspan>
+  </text>
+  <rect x="902" y="574" width="248" height="34" rx="9" fill="#ffffff" fill-opacity=".8"/>
+  <text x="1026" y="596" text-anchor="middle" class="value">Build and publish; deployment is manual</text>
+</svg>

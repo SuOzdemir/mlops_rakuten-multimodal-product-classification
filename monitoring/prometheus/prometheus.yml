@@ -17,3 +17,10 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["host.docker.internal:8000"]
+
+  # Optional sidecar started with `make evidently-up`. It does not replace the
+  # API's existing prediction_drift_psi metric.
+  - job_name: evidently-monitor
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["evidently-monitor:8002"]

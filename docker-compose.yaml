@@ -219,6 +219,47 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  # Optional out-of-band drift monitor. It reads privacy-safe prediction
+  # features from PostgreSQL and never sits on the live prediction request
+  # path. Start explicitly with `make evidently-up`; the existing in-memory
+  # PSI -> Prometheus -> Grafana path remains unchanged.
+  evidently-monitor:
+    build:
+      context: .
+      dockerfile: monitoring/evidently/Dockerfile
+    profiles: ["evidently"]
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./outputs/image_modeling:/reference:ro
+      - evidently_reports:/reports
+    environment:
+      - DATABASE_URL=postgresql://api:${API_DB_PASSWORD:?Set API_DB_PASSWORD in .env}@postgres:5432/api
+      - EVIDENTLY_REFERENCE_DATA=/reference/train_split.csv
+      - EVIDENTLY_INTERVAL_SECONDS=${EVIDENTLY_INTERVAL_SECONDS:-60}
+      - EVIDENTLY_WINDOW_SIZE=${EVIDENTLY_WINDOW_SIZE:-200}
+      - EVIDENTLY_MIN_CURRENT_ROWS=${EVIDENTLY_MIN_CURRENT_ROWS:-5}
+      - EVIDENTLY_REFERENCE_SAMPLE_SIZE=${EVIDENTLY_REFERENCE_SAMPLE_SIZE:-5000}
+      - EVIDENTLY_PSI_THRESHOLD=${EVIDENTLY_PSI_THRESHOLD:-0.10}
+      - EVIDENTLY_DRIFT_SHARE_THRESHOLD=${EVIDENTLY_DRIFT_SHARE_THRESHOLD:-0.50}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      - MINIO_SECURE=false
+      - EVIDENTLY_MINIO_BUCKET=evidently-reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana:latest
     entrypoint: ["/bin/sh", "/usr/local/bin/grafana-entrypoint.sh"]
@@ -259,6 +300,11 @@ services:
       - "8501:8501"
     environment:
       - API_URL=http://api:8000
+      - MLFLOW_PUBLIC_URL=http://localhost:5001
+      - AIRFLOW_PUBLIC_URL=http://localhost:8080
+      - GRAFANA_PUBLIC_URL=http://localhost:3000
+      - PROMETHEUS_PUBLIC_URL=http://localhost:9090
+      - EVIDENTLY_PUBLIC_URL=http://localhost:8002
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
@@ -266,6 +312,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     restart: unless-stopped
 
 volumes:
@@ -273,3 +329,4 @@ volumes:
   prometheus_data:
   grafana_data:
   minio_data:
+  evidently_reports:

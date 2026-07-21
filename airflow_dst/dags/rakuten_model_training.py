@@ -167,6 +167,18 @@ def rakuten_model_training():
             "USE_AMP_OVERRIDE": "{{ params.use_amp }}",
             "LABEL_SMOOTHING_OVERRIDE": "{{ dag_run.conf.get('label_smoothing', '') }}",
             "DROPOUT_OVERRIDE": "{{ dag_run.conf.get('dropout', '') }}",
+            # Not configurable per-run (fixed in config.py) -- passed through
+            # only so they show up in Airflow's rendered-template view instead
+            # of having to open config.py to see what a run actually used.
+            "NUM_WORKERS": "4",
+            "SCHEDULER_FACTOR": "0.5",
+            "SCHEDULER_PATIENCE": "{{ '2' if params.model == 'image' else '1' }}",
+            "SCHEDULER_MIN_LR": "1e-07",
+            "CUDNN_BENCHMARK": "{{ 'true' if params.model == 'image' else 'n/a (image-only)' }}",
+            "CUDNN_DETERMINISTIC": "{{ 'false' if params.model == 'image' else 'n/a (image-only)' }}",
+            "EXPORT_FEATURES": "true",
+            "RESUME_TRAINING": "false",
+            "CHECKPOINT_SOURCE": "local_last",
             "TRAIN_ROWS_OVERRIDE": os.environ.get("TRAIN_ROWS_OVERRIDE", ""),
             "VAL_ROWS_OVERRIDE": os.environ.get("VAL_ROWS_OVERRIDE", ""),
         },

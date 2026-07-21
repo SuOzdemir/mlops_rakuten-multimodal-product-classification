@@ -1,4 +1,4 @@
-.PHONY: install setup-data prepare-splits docker-up up serve up-all down down-all restart-all logs health airflow-up airflow-down airflow-logs test manual-up manual-down manual-up-all manual-down-all
+.PHONY: install setup-data prepare-splits docker-up up serve up-all down down-all restart-all logs health airflow-up airflow-down airflow-logs evidently-up evidently-down evidently-logs test manual-up manual-down manual-up-all manual-down-all
 
 # Ensure the Docker daemon is available. On macOS, start Docker Desktop when
 # needed and wait up to two minutes for it to become ready.
@@ -85,6 +85,18 @@ airflow-down:
 
 airflow-logs:
 	cd airflow_dst && docker compose --env-file ../.env logs -f
+
+# Optional Evidently sidecar. Rebuild the API first so prediction_events are
+# persisted, then start the monitor without replacing the existing PSI path.
+evidently-up: docker-up
+	docker compose up --build -d --wait api
+	docker compose --profile evidently up --build -d --wait evidently-monitor
+
+evidently-down:
+	docker compose --profile evidently stop evidently-monitor
+
+evidently-logs:
+	docker compose --profile evidently logs -f evidently-monitor
 
 test:
 	uv run pytest

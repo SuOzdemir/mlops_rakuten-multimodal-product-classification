@@ -112,7 +112,8 @@ def client():
     """TestClient with user lookup mocked so lifespan doesn't touch the DB file."""
     with patch("src.api.main.init_db"), \
          patch("src.api.main.get_user", side_effect=_fake_get_user), \
-         patch("src.api.main.verify_password", side_effect=_fake_verify_password):
+         patch("src.api.main.verify_password", side_effect=_fake_verify_password), \
+         patch("src.api.main.record_prediction_event"):
         with TestClient(app) as c:
             yield c
     # Reset module-level globals; assign new objects instead of mutating in-place
@@ -374,6 +375,40 @@ def test_predict_custom_image_weight(client, auth_headers):
     mock_predict.assert_called_once()
     _, kwargs = mock_predict.call_args
     assert kwargs["image_weight"] == pytest.approx(0.7)
+
+
+def test_predict_monitoring_write_is_fail_open(client, auth_headers):
+    """A monitoring database outage must not break the live prediction path."""
+    with patch("src.api.main._get_assets", return_value=FAKE_ASSETS), \
+         patch("src.api.main.predict", return_value=FAKE_PREDICT_RESULT), \
+         patch("src.api.main.record_prediction_event", side_effect=RuntimeError("db unavailable")):
+        resp = client.post(
+            "/predict",
+            headers=auth_headers,
+            data={"designation": "Livre", "description": "Recettes"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["top3"][0]["prdtypecode"] == 10
+
+
+def test_predict_persists_only_monitoring_features(client, auth_headers):
+    with patch("src.api.main._get_assets", return_value=FAKE_ASSETS), \
+         patch("src.api.main.predict", return_value=FAKE_PREDICT_RESULT), \
+         patch("src.api.main.record_prediction_event") as event_writer:
+        resp = client.post(
+            "/predict",
+            headers=auth_headers,
+            data={"designation": "Livre", "description": "Recettes"},
+        )
+    assert resp.status_code == 200
+    event_writer.assert_called_once()
+    event = event_writer.call_args.kwargs
+    assert event["predicted_code"] == 10
+    assert event["designation_length"] == 5
+    assert event["description_length"] == 8
+    assert event["has_image"] is False
+    assert "designation" not in event
+    assert "description" not in event
 
 
 # ---------------------------------------------------------------------------

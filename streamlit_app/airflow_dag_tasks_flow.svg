@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title description">
+  <title id="title">Rakuten model training DAG</title>
+  <desc id="description">The three success-dependent tasks in the rakuten_model_training Airflow DAG.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f172a" flood-opacity=".11"/>
+    </filter>
+    <marker id="purple-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="cyan-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <style>
+      .title { font-family: Arial, Helvetica, sans-serif; font-size: 34px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 400; fill: #64748b; }
+      .dag-title { font-family: Arial, Helvetica, sans-serif; font-size: 22px; font-weight: 700; fill: #1e293b; }
+      .dag-sub { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; fill: #64748b; }
+      .node-title { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; fill: #0f172a; }
+      .node-sub { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; fill: #64748b; }
+      .light-title { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; fill: #0f172a; }
+      .light-sub { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; fill: #64748b; }
+      .edge { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; fill: #475569; }
+      .step { font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .8px; }
+      .mono { font-family: Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="980" rx="24" fill="#f0fdf4"/>
+  <text x="48" y="54" class="title">Training DAG · rakuten_model_training</text>
+  <text x="48" y="82" class="subtitle">Airflow orchestrates three success-dependent tasks; model training runs in an ephemeral trainer container.</text>
+
+  <!-- DAG 1 -->
+  <rect x="40" y="112" width="1520" height="344" rx="20" fill="#fff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <rect x="64" y="132" width="180" height="28" rx="14" fill="#f8fafc"/>
+  <text x="154" y="151" text-anchor="middle" class="step" fill="#16a34a">TRAINING DAG</text>
+  <text x="270" y="153" class="dag-title">rakuten_model_training</text>
+  <text x="270" y="178" class="dag-sub">schedule=None · Triggered by FastAPI POST /retrain or the Airflow UI</text>
+
+  <rect x="72" y="222" width="392" height="180" rx="16" fill="#ecfdf5" stroke="#16a34a" stroke-width="5"/>
+  <rect x="90" y="240" width="84" height="24" rx="12" fill="#f8fafc"/>
+  <text x="132" y="256" text-anchor="middle" class="step" fill="#16a34a">TASK 1</text>
+  <text x="268" y="291" text-anchor="middle" class="node-title">DVC + scikit-learn / prepare_data</text>
+  <text x="268" y="318" text-anchor="middle" class="mono">@task · Python in Airflow scheduler</text>
+  <text x="268" y="345" text-anchor="middle" class="node-sub">dvc repro prepare_splits</text>
+  <text x="268" y="368" text-anchor="middle" class="node-sub">Full dataset → stratified split (seed=42)</text>
+  <text x="268" y="389" text-anchor="middle" class="node-sub">The same split is shared by image and text training</text>
+
+  <path d="M464 312 H536" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#purple-arrow)"/>
+  <text x="500" y="298" text-anchor="middle" class="edge">success</text>
+
+  <rect x="542" y="204" width="500" height="216" rx="16" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <rect x="560" y="222" width="84" height="24" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="602" y="238" text-anchor="middle" class="step" fill="#7e22ce">TASK 2</text>
+  <text x="792" y="275" text-anchor="middle" class="light-title">Airflow DockerOperator / launch_trainer</text>
+  <text x="792" y="302" text-anchor="middle" class="light-sub">DockerOperator · ephemeral trainer container</text>
+  <text x="792" y="329" text-anchor="middle" class="light-sub">MODEL=image → dvc repro train_image --force --single-item</text>
+  <text x="792" y="352" text-anchor="middle" class="light-sub">MODEL=text → dvc repro train_text --force --single-item</text>
+  <text x="792" y="375" text-anchor="middle" class="light-sub">Run parameters are passed as environment overrides</text>
+  <text x="792" y="398" text-anchor="middle" class="light-sub">Writes MLflow metrics, the best checkpoint and best_macro_f1</text>
+
+  <path d="M1042 312 H1114" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#purple-arrow)"/>
+  <text x="1078" y="298" text-anchor="middle" class="edge">success only</text>
+
+  <rect x="1120" y="222" width="408" height="180" rx="16" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <rect x="1138" y="240" width="84" height="24" rx="12" fill="#faf5ff"/>
+  <text x="1180" y="256" text-anchor="middle" class="step" fill="#7e22ce">TASK 3</text>
+  <text x="1324" y="291" text-anchor="middle" class="node-title">Airflow / trigger_promotion</text>
+  <text x="1324" y="318" text-anchor="middle" class="mono">TriggerDagRunOperator</text>
+  <text x="1324" y="345" text-anchor="middle" class="node-sub">Triggers the rakuten_model_promotion DAG</text>
+  <text x="1324" y="368" text-anchor="middle" class="node-sub">conf = selected model</text>
+  <text x="1324" y="389" text-anchor="middle" class="node-sub">wait_for_completion=True</text>
+
+  <rect x="40" y="474" width="1520" height="28" rx="14" fill="#f8fafc"/>
+  <text x="800" y="493" text-anchor="middle" class="edge">Any task failure stops downstream execution; promotion starts only after training succeeds.</text>
+
+  <!-- launch_trainer internal flow -->
+  <rect x="40" y="526" width="1520" height="398" rx="20" fill="#fff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <rect x="64" y="546" width="300" height="28" rx="14" fill="#f8fafc"/>
+  <text x="214" y="565" text-anchor="middle" class="step" fill="#16a34a">LAUNCH_TRAINER INTERNAL FLOW</text>
+  <text x="390" y="567" class="dag-title">Training + MLflow tracking</text>
+  <text x="390" y="591" class="dag-sub">The trainer calls MLflow; the MLflow server routes metadata and artifact files to different stores.</text>
+
+  <rect x="66" y="626" width="250" height="126" rx="15" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+  <text x="191" y="657" text-anchor="middle" class="node-title">1 · pandas / Random subset</text>
+  <text x="191" y="681" text-anchor="middle" class="node-sub">Applied inside launch_trainer</text>
+  <text x="191" y="703" text-anchor="middle" class="mono">TRAIN_ROWS_OVERRIDE=1000</text>
+  <text x="191" y="725" text-anchor="middle" class="node-sub">New random sample on every run</text>
+  <text x="191" y="744" text-anchor="middle" class="node-sub">Validation cap is configured separately</text>
+
+  <path d="M316 689 H354" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#purple-arrow)"/>
+
+  <rect x="360" y="626" width="234" height="126" rx="15" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="477" y="657" text-anchor="middle" class="node-title">2 · MLflow / Start run</text>
+  <text x="477" y="683" text-anchor="middle" class="node-sub">rakuten-image-modeling</text>
+  <text x="477" y="705" text-anchor="middle" class="node-sub">or rakuten-text-modeling</text>
+  <text x="477" y="729" text-anchor="middle" class="mono">mlflow.start_run()</text>
+
+  <path d="M594 689 H632" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#purple-arrow)"/>
+
+  <rect x="638" y="626" width="246" height="126" rx="15" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="761" y="657" text-anchor="middle" class="node-title">3 · MLflow / Log parameters</text>
+  <text x="761" y="683" text-anchor="middle" class="node-sub">Architecture · epochs · batch size</text>
+  <text x="761" y="705" text-anchor="middle" class="node-sub">Learning rate · seed · regularization</text>
+  <text x="761" y="729" text-anchor="middle" class="mono">mlflow.log_params(...)</text>
+
+  <path d="M884 689 H922" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#purple-arrow)"/>
+
+  <rect x="928" y="614" width="270" height="150" rx="15" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+  <text x="1063" y="647" text-anchor="middle" class="light-title">4 · PyTorch + MLflow / Train</text>
+  <text x="1063" y="674" text-anchor="middle" class="light-sub">Loss · accuracy · Macro-F1</text>
+  <text x="1063" y="696" text-anchor="middle" class="light-sub">Weighted-F1 · learning rate</text>
+  <text x="1063" y="720" text-anchor="middle" class="light-sub">Logged once per epoch</text>
+  <text x="1063" y="744" text-anchor="middle" class="light-sub">mlflow.log_metrics(..., step=epoch)</text>
+
+  <path d="M1198 689 H1236" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#purple-arrow)"/>
+
+  <rect x="1242" y="614" width="290" height="150" rx="15" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+  <text x="1387" y="647" text-anchor="middle" class="node-title">5 · PyTorch / Best checkpoint</text>
+  <text x="1387" y="674" text-anchor="middle" class="node-sub">Highest validation Macro-F1</text>
+  <text x="1387" y="696" text-anchor="middle" class="node-sub">Save best weights locally</text>
+  <text x="1387" y="718" text-anchor="middle" class="node-sub">Write run_metadata.json</text>
+  <text x="1387" y="740" text-anchor="middle" class="node-sub">Generate training_curves.png</text>
+
+  <path d="M1387 764 V908 H194 V898" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#cyan-arrow)"/>
+  <text x="800" y="902" text-anchor="middle" class="step" fill="#16a34a">BEST RUN OUTPUTS</text>
+
+  <rect x="70" y="790" width="248" height="102" rx="15" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="194" y="823" text-anchor="middle" class="node-title">6 · MLflow / Log artifacts</text>
+  <text x="194" y="848" text-anchor="middle" class="node-sub">Weights · run_metadata.json · curves</text>
+  <text x="194" y="870" text-anchor="middle" class="node-sub">MLflow → MinIO / mlflow-artifacts</text>
+
+  <path d="M318 841 H382" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#cyan-arrow)"/>
+
+  <rect x="388" y="790" width="284" height="102" rx="15" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="530" y="823" text-anchor="middle" class="light-title">7 · MLflow / Tracking server</text>
+  <text x="530" y="848" text-anchor="middle" class="light-sub">http://mlflow:5001</text>
+  <text x="530" y="870" text-anchor="middle" class="light-sub">Artifact proxy: --serve-artifacts</text>
+
+  <path d="M672 824 H748" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#cyan-arrow)"/>
+  <path d="M672 858 H710 V770 H1304 V778" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#cyan-arrow)"/>
+  <text x="710" y="814" text-anchor="middle" class="step" fill="#475569">METRICS</text>
+  <text x="1010" y="762" text-anchor="middle" class="step" fill="#475569">ARTIFACT FILES</text>
+
+  <rect x="754" y="778" width="298" height="114" rx="15" fill="#ecfeff" stroke="#0891b2" stroke-width="2"/>
+  <text x="903" y="811" text-anchor="middle" class="node-title">PostgreSQL / Store metadata</text>
+  <text x="903" y="837" text-anchor="middle" class="node-sub">run_id · experiment_id · status · timestamps</text>
+  <text x="903" y="859" text-anchor="middle" class="node-sub">parameters · epoch metrics · tags · artifact URI</text>
+  <text x="903" y="881" text-anchor="middle" class="step" fill="#16a34a">STRUCTURED METADATA</text>
+
+  <rect x="1076" y="778" width="456" height="114" rx="15" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <text x="1304" y="811" text-anchor="middle" class="node-title">MinIO / Store artifacts</text>
+  <text x="1304" y="837" text-anchor="middle" class="node-sub">Best model weights · run_metadata.json</text>
+  <text x="1304" y="859" text-anchor="middle" class="node-sub">training_curves.png and other artifact files</text>
+  <text x="1304" y="881" text-anchor="middle" class="step" fill="#16a34a">S3-COMPATIBLE ARTIFACT STORAGE</text>
+
+  <text x="800" y="954" text-anchor="middle" class="node-sub">Airflow keeps task stdout/stderr in Airflow logs; MLflow artifact files are stored in MinIO.</text>
+  <text x="800" y="974" text-anchor="middle" class="node-sub">Source: airflow_dst/dags/rakuten_model_training.py · models/*/train.py · docker-compose.yaml</text>
+</svg>

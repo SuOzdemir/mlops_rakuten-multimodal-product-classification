@@ -16,7 +16,9 @@ x-airflow-common: &airflow-common
     # via the duplicate-running-job check in src/api/retrain.py).
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth  # lets /retrain call the REST API
+    # Local-dev only: opens the REST API (used by /retrain) and the web UI
+    # (via config/webserver_config.py's AUTH_ROLE_PUBLIC) with no login.
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.default
     RAKUTEN_PROJECT_DIR: ${RAKUTEN_PROJECT_DIR:-/project}
     CAMEMBERT_BASE_DIR: ${CAMEMBERT_BASE_DIR:-/project/data/rakuten_streamlit_predictor/text_model/camembert_run4}
     MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5001}
@@ -24,6 +26,7 @@ x-airflow-common: &airflow-common
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    - ./config/webserver_config.py:/opt/airflow/webserver_config.py
     - ../:/project:rw    # full project mounted so DAGs can read models/ and write data/
   env_file:
     - ../.env

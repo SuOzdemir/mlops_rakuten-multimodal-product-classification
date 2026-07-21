@@ -5,14 +5,13 @@ stages:
     deps:
     - path: data/raw
       hash: md5
-      md5: e1d46facf4b2aebf48f81cc2166ad6ab.dir
-      size: 2990123880
-      nfiles: 98735
+      md5: bd81f939722e7a41eeff6e27d8ef21ad.dir
+      size: 6566079979
+      nfiles: 263669
     - path: scripts/prepare_splits.py
       hash: md5
-      md5: cd8c8f772c7b7d0a9f1879c3a67509d2
-      size: 4113
-      isexec: true
+      md5: 00e34b1d7b7a3d17aec7056e835c73de
+      size: 4000
     outs:
     - path: outputs/image_modeling/label2id.json
       hash: md5
@@ -73,24 +72,20 @@ stages:
     deps:
     - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/config.py
       hash: md5
-      md5: 2a773c179753419cab700b1e43334aca
-      size: 5875
-      isexec: true
+      md5: 1f7fdec7b1710f313a61dd839ccb6d1e
+      size: 5734
     - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/dataset.py
       hash: md5
-      md5: dc3d83fa9bc39ff96bb903f7df469165
-      size: 2057
-      isexec: true
+      md5: 482f385cbeadbcb72ee2981b146d75ee
+      size: 1994
     - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/train.py
       hash: md5
-      md5: 08f416358ab3c1f4239b9dcebd0536a4
-      size: 15143
-      isexec: true
+      md5: 305139b70a9cd00c7d922b2da2abe2f5
+      size: 15412
     - path: models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/utils.py
       hash: md5
-      md5: f526bb334a9b2a5d094a007664a80078
-      size: 16207
-      isexec: true
+      md5: b0948b4f36c47992aaa29fe983691ce3
+      size: 15752
     - path: outputs/image_modeling/label2id.json
       hash: md5
       md5: 2c4ee652148136abed6e670fa20052bb
@@ -107,5 +102,5 @@ stages:
     - path: 
         models/textModeling/Model_T8_CamemBERT_FullFineTune_L128/best_model_text.pt
       hash: md5
-      md5: 7a7eaf68d3e2439b8e2474a97f499b68
+      md5: 0fa5e37e776424249007d40344629e29
       size: 442652965

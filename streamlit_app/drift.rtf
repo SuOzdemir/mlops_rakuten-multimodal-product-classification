@@ -1,0 +1,34 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 After finding an optimal AI model for some prediction requirement and some data,\
+the work seems to be done.\
+But in a moving world, data, requirements, targets  etc. are changing in time, so the model\
+becomes more and more inappropriate, which in many cases is a gradual, insidious process.\
+\
+MLOps controls AI model development and deployment by\
+- addressing the data dependency and taking into account the change of data in time\
+- automating processes like data preparation, model training validation and model deployment\
+- assuring reproducibility e.g. by versioning\
+\
+One key point is the detection and measurement of decrease in model performance and prediction quality, the so-called performance drift and prediction drift, which triggers several actions performed by applying the MLOps framework.\
+\
+There are several drift types:\
+\
+Data drift\
+Data is in general a mixture of text, image and even sound data. The statistical distribution of the data can vary in time, e.g. for text values the language may change. In these cases the model prediction quality may decrease due to a data drift.\
+\
+Concept drift\
+The relation between input variables and target variables changes, e.g. the target variable range changes.\
+\
+Prediction drift\
+The statistical distribution of predicted values changes. This change is measured e.g. by the Jensen-Shannon distance. In most cases, this drift goes along with a decrease in prediction quality, but this is not necessary. E.g. for data given as text and images, the prediction quality related to the text data could increase and related to the images could decrease. Therefore, the overall prediction quality could remain the same, but the statistical distribution would change. The prediction drift measures this change.\
+\
+Performance drift\
+The prediction quality is measured by calculating several metric values, like accuracy, F1 score etc..\
+A change of these values is called performance drift.\
+}

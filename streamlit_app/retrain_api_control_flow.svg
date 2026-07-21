@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title description">
+  <title id="title">Retraining API control flow</title>
+  <desc id="description">Streamlit requests retraining from FastAPI, FastAPI validates and triggers Airflow, then returns a job ID while Airflow runs the training and promotion DAGs asynchronously.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .lane { font: 700 11px Inter, Arial, sans-serif; letter-spacing: 1.1px; fill: #15803d; }
+      .title { font: 750 16px Inter, Arial, sans-serif; fill: #0f172a; }
+      .body { font: 500 12px Inter, Arial, sans-serif; fill: #475569; }
+      .label { font: 650 11px Inter, Arial, sans-serif; fill: #64748b; }
+      .step { font: 800 11px Inter, Arial, sans-serif; fill: #ffffff; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="330" rx="20" fill="#f5fbf7"/>
+  <text x="28" y="31" class="lane">SYNCHRONOUS CONTROL PATH</text>
+
+  <!-- Step 1 -->
+  <rect x="28" y="54" width="205" height="116" rx="15" fill="#fdf4ff" stroke="#e9d5ff" stroke-width="1.5"/>
+  <circle cx="51" cy="77" r="13" fill="#c084fc"/>
+  <text x="51" y="81" text-anchor="middle" class="step">1</text>
+  <text x="72" y="82" class="title">Admin · Streamlit</text>
+  <text x="48" y="112" class="body">
+    <tspan x="48" dy="0">Selects image/text model</tspan>
+    <tspan x="48" dy="19">and hyperparameters</tspan>
+  </text>
+
+  <!-- Step 2 -->
+  <rect x="286" y="54" width="275" height="116" rx="15" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+  <circle cx="309" cy="77" r="13" fill="#60a5fa"/>
+  <text x="309" y="81" text-anchor="middle" class="step">2</text>
+  <text x="330" y="82" class="title">FastAPI · Control API</text>
+  <text x="306" y="108" class="body">
+    <tspan x="306" dy="0">Admin authorization · parameter validation</tspan>
+    <tspan x="306" dy="19">Single active run protects the shared DVC lock</tspan>
+  </text>
+
+  <!-- Step 3 -->
+  <rect x="614" y="54" width="235" height="116" rx="15" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1.5"/>
+  <circle cx="637" cy="77" r="13" fill="#a78bfa"/>
+  <text x="637" y="81" text-anchor="middle" class="step">3</text>
+  <text x="658" y="82" class="title">Airflow REST API</text>
+  <text x="634" y="112" class="body">
+    <tspan x="634" dy="0">Creates a unique training</tspan>
+    <tspan x="634" dy="19">DAG run and returns its ID</tspan>
+  </text>
+
+  <!-- Step 4 -->
+  <rect x="902" y="54" width="270" height="116" rx="15" fill="#ecfeff" stroke="#a5f3fc" stroke-width="1.5"/>
+  <circle cx="925" cy="77" r="13" fill="#22d3ee"/>
+  <text x="925" y="81" text-anchor="middle" class="step">4</text>
+  <text x="946" y="82" class="title">Job status in Streamlit</text>
+  <text x="922" y="108" class="body">
+    <tspan x="922" dy="0">FastAPI returns job_id immediately</tspan>
+    <tspan x="922" dy="19">UI polls GET /retrain/{job_id} every 5 s</tspan>
+  </text>
+
+  <!-- Synchronous arrows -->
+  <line x1="233" y1="104" x2="278" y2="104" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="255" y="94" text-anchor="middle" class="label">POST /retrain</text>
+  <line x1="561" y1="104" x2="606" y2="104" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="584" y="94" text-anchor="middle" class="label">REST</text>
+  <line x1="849" y1="104" x2="894" y2="104" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="872" y="94" text-anchor="middle" class="label">job_id</text>
+
+  <!-- Asynchronous lane -->
+  <text x="28" y="211" class="lane">ASYNCHRONOUS EXECUTION — OUTSIDE FASTAPI</text>
+  <path d="M731 170 V194 H423 V220" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="286" y="228" width="275" height="74" rx="14" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5"/>
+  <text x="423.5" y="257" text-anchor="middle" class="title">Training DAG</text>
+  <text x="423.5" y="280" text-anchor="middle" class="body">Prepare data · trainer container · MLflow</text>
+
+  <line x1="561" y1="265" x2="639" y2="265" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="600" y="253" text-anchor="middle" class="label">on success</text>
+
+  <rect x="647" y="228" width="275" height="74" rx="14" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5"/>
+  <text x="784.5" y="257" text-anchor="middle" class="title">Promotion DAG</text>
+  <text x="784.5" y="280" text-anchor="middle" class="body">Candidate · champion gate · deployment</text>
+
+  <rect x="951" y="228" width="221" height="74" rx="14" fill="#ffffff" stroke="#dbe4e0" stroke-width="1.5"/>
+  <text x="1061.5" y="256" text-anchor="middle" class="title">API stays available</text>
+  <text x="1061.5" y="280" text-anchor="middle" class="body">Training never runs in FastAPI</text>
+</svg>

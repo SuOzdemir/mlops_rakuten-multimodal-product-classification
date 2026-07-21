@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Package structure the API needs to import from
 COPY src/__init__.py              /project/src/__init__.py
 COPY src/api/                     /project/src/api/
-COPY streamlit_app/__init__.py    /project/streamlit_app/__init__.py
-COPY streamlit_app/services/      /project/streamlit_app/services/
+COPY streamlit_app/__init__.py /project/streamlit_app/__init__.py
+COPY streamlit_app/services/   /project/streamlit_app/services/
 
 EXPOSE 8000
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

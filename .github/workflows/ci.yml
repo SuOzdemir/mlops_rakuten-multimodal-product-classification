@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI and Container Publishing
 
 on:
   push:
@@ -60,6 +60,9 @@ jobs:
           - name: promotion
             context: .
             dockerfile: promotion/Dockerfile
+          - name: evidently
+            context: .
+            dockerfile: monitoring/evidently/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

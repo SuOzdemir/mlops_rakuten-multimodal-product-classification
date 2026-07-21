@@ -38,3 +38,71 @@ groups:
           summary: "PSI is {{ $values.A }} (alert threshold 0.60) -- live prediction distribution has significantly diverged from the training set."
         labels:
           severity: warning
+
+      - uid: evidently-dataset-drift-share-alert
+        title: "Evidently dataset drift detected"
+        condition: C
+        # Require two consecutive evaluations so a single short-lived report
+        # does not immediately move the alert to Firing.
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: evidently_dataset_drift_share
+              instant: true
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.50]
+        annotations:
+          summary: "Evidently reports a dataset drift share of {{ $values.A }} (alert threshold 0.50)."
+        labels:
+          severity: warning
+          monitor: evidently
+
+      - uid: evidently-column-psi-alert
+        title: "Evidently column PSI significant"
+        condition: C
+        # Prometheus returns one series per column. Grafana therefore creates
+        # an independently evaluated alert instance for each column label.
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: evidently_column_drift_score
+              instant: true
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.10]
+        annotations:
+          summary: "Evidently PSI for {{ $labels.column }} is {{ $values.A }} (alert threshold 0.10)."
+        labels:
+          severity: warning
+          monitor: evidently

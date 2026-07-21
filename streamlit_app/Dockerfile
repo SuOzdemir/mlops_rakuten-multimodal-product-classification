@@ -5,9 +5,7 @@ WORKDIR /project
 COPY streamlit_app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-COPY streamlit_app/Home.py           /project/streamlit_app/Home.py
-COPY streamlit_app/project_story.py  /project/streamlit_app/project_story.py
-COPY streamlit_app/__init__.py       /project/streamlit_app/__init__.py
+COPY streamlit_app/ /project/streamlit_app/
 
 EXPOSE 8501
 CMD ["streamlit", "run", "streamlit_app/Home.py", \

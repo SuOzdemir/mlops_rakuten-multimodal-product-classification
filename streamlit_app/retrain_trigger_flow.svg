@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="650" viewBox="0 0 1600 650" role="img" aria-labelledby="title description">
+  <title id="title">Retrain request triggers Airflow</title>
+  <desc id="description">Admin retrain request travels through Streamlit and FastAPI to the Airflow REST API, which creates a training DAG run. Status returns through FastAPI to Streamlit.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f172a" flood-opacity=".11"/>
+    </filter>
+    <marker id="blue-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="slate-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font-family: Arial, Helvetica, sans-serif; font-size: 34px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 400; fill: #64748b; }
+      .node-title { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; fill: #0f172a; }
+      .node-sub { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; fill: #64748b; }
+      .light-title { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; fill: #0f172a; }
+      .light-sub { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; fill: #64748b; }
+      .edge { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; fill: #475569; }
+      .step { font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .8px; }
+      .mono { font-family: Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="650" rx="24" fill="#f0fdf4"/>
+  <text x="48" y="54" class="title">Retrain Nasıl Airflow’u Tetikliyor?</text>
+  <text x="48" y="82" class="subtitle">Kullanıcı aksiyonundan Airflow DAG run oluşturulmasına ve durum takibine kadar gerçek istek yolu</text>
+
+  <rect x="40" y="112" width="1520" height="324" rx="20" fill="#fff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <rect x="64" y="132" width="170" height="28" rx="14" fill="#f8fafc"/>
+  <text x="149" y="151" text-anchor="middle" class="step" fill="#16a34a">RETRAIN TRIGGER</text>
+
+  <rect x="72" y="214" width="230" height="132" rx="16" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <rect x="88" y="228" width="64" height="22" rx="11" fill="#e2e8f0"/>
+  <text x="120" y="243" text-anchor="middle" class="step" fill="#475569">STEP 1</text>
+  <text x="187" y="275" text-anchor="middle" class="node-title">Admin</text>
+  <text x="187" y="300" text-anchor="middle" class="node-sub">Image veya text modeli seçer</text>
+  <text x="187" y="322" text-anchor="middle" class="node-sub">Epoch · batch size · LR · seed · …</text>
+
+  <path d="M302 280 H356" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#blue-arrow)"/>
+  <text x="329" y="266" text-anchor="middle" class="edge">click</text>
+
+  <rect x="362" y="204" width="256" height="152" rx="16" fill="#fdf4ff" stroke="#d946ef" stroke-width="2"/>
+  <rect x="378" y="218" width="64" height="22" rx="11" fill="#fdf4ff" stroke="#d946ef" stroke-width="2"/>
+  <text x="410" y="233" text-anchor="middle" class="step" fill="#16a34a">STEP 2</text>
+  <text x="490" y="267" text-anchor="middle" class="light-title">Streamlit UI</text>
+  <text x="490" y="294" text-anchor="middle" class="light-sub">Form değerlerini toplar</text>
+  <text x="490" y="318" text-anchor="middle" class="light-sub">Bearer token + parameters</text>
+  <text x="490" y="341" text-anchor="middle" class="light-sub">POST /retrain</text>
+
+  <path d="M618 280 H672" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#blue-arrow)"/>
+  <text x="645" y="266" text-anchor="middle" class="edge">HTTP</text>
+
+  <rect x="678" y="190" width="300" height="180" rx="16" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <rect x="694" y="204" width="64" height="22" rx="11" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <text x="726" y="219" text-anchor="middle" class="step" fill="#16a34a">STEP 3</text>
+  <text x="828" y="253" text-anchor="middle" class="light-title">FastAPI /retrain</text>
+  <text x="828" y="280" text-anchor="middle" class="light-sub">Admin rolünü doğrular</text>
+  <text x="828" y="303" text-anchor="middle" class="light-sub">Parametreleri validate eder</text>
+  <text x="828" y="326" text-anchor="middle" class="light-sub">Aynı anda ikinci retrain’i engeller</text>
+  <text x="828" y="349" text-anchor="middle" class="light-sub">dag_run_id + conf hazırlar</text>
+
+  <rect x="935" y="164" width="146" height="24" rx="12" fill="#f8fafc"/>
+  <text x="1008" y="181" text-anchor="middle" class="step" fill="#16a34a">POST AIRFLOW DAGRUN</text>
+  <path d="M978 280 H1032" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#blue-arrow)"/>
+
+  <rect x="1038" y="204" width="256" height="152" rx="16" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <rect x="1054" y="218" width="64" height="22" rx="11" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="1086" y="233" text-anchor="middle" class="step" fill="#16a34a">STEP 4</text>
+  <text x="1166" y="267" text-anchor="middle" class="light-title">Airflow REST API</text>
+  <text x="1166" y="294" text-anchor="middle" class="light-sub">DAG run kaydı oluşturur</text>
+  <text x="1166" y="318" text-anchor="middle" class="light-sub">conf: model + hyperparameters</text>
+  <text x="1166" y="341" text-anchor="middle" class="light-sub">State: queued</text>
+
+  <path d="M1294 280 H1348" stroke="#16a34a" stroke-width="3" fill="none" marker-end="url(#blue-arrow)"/>
+
+  <rect x="1354" y="214" width="174" height="132" rx="16" fill="#ecfdf5" stroke="#16a34a" stroke-width="2"/>
+  <rect x="1370" y="228" width="64" height="22" rx="11" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="1402" y="243" text-anchor="middle" class="step" fill="#16a34a">STEP 5</text>
+  <text x="1441" y="275" text-anchor="middle" class="light-title">Training DAG</text>
+  <text x="1441" y="299" text-anchor="middle" class="light-sub">rakuten_model_training</text>
+  <text x="1441" y="322" text-anchor="middle" class="light-sub">queued → running</text>
+
+  <!-- status return -->
+  <rect x="40" y="466" width="1520" height="136" rx="20" fill="#ffffff" stroke="#dbe4f0"/>
+  <rect x="64" y="486" width="170" height="28" rx="14" fill="#e2e8f0"/>
+  <text x="149" y="505" text-anchor="middle" class="step" fill="#334155">STATUS LOOP</text>
+
+  <text x="126" y="553" class="node-sub">Her 5 saniyede:</text>
+  <rect x="260" y="526" width="302" height="52" rx="13" fill="#fdf4ff" stroke="#d946ef" stroke-width="2"/>
+  <text x="411" y="549" text-anchor="middle" class="light-title">Streamlit auto-refresh</text>
+  <text x="411" y="568" text-anchor="middle" class="light-sub">GET /retrain/{job_id}</text>
+
+  <path d="M562 552 H650" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#slate-arrow)"/>
+
+  <rect x="656" y="526" width="286" height="52" rx="13" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <text x="799" y="549" text-anchor="middle" class="light-title">FastAPI status proxy</text>
+  <text x="799" y="568" text-anchor="middle" class="light-sub">Queries Airflow DAG run state</text>
+
+  <path d="M942 552 H1030" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#slate-arrow)"/>
+
+  <rect x="1036" y="526" width="286" height="52" rx="13" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="1179" y="549" text-anchor="middle" class="light-title">Airflow state</text>
+  <text x="1179" y="568" text-anchor="middle" class="light-sub">queued · running · success · failed</text>
+
+  <path d="M1322 552 H1410" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#slate-arrow)"/>
+  <text x="1430" y="547" class="light-title">UI</text>
+  <text x="1430" y="568" class="light-sub">updates</text>
+
+  <text x="800" y="632" text-anchor="middle" class="node-sub">Source: streamlit_app/Home.py · src/api/retrain.py · Airflow REST API</text>
+</svg>

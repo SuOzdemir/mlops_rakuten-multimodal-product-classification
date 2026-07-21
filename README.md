@@ -14,9 +14,9 @@ Multimodal (text + image) product category classification for the Rakuten France
 | Val Macro F1 — ConvNeXt-Base (image) | Model quality | **0.692** |
 | Val Macro F1 — Late fusion (α=0.45) | Model quality | **~0.893** |
 | Public leaderboard rank | Business | Top 5 ([challengedata.ens.fr](https://challengedata.ens.fr/participants/challenges/35/ranking/public)) |
-| API test coverage | Engineering | 57 unit tests, gated in CI on every push/PR |
+| API test coverage | Engineering | 59 unit tests, gated in CI on every push/PR |
 | Serving latency / uptime | Ops | Prometheus + Grafana (`Rakuten API Overview` dashboard) |
-| Prediction drift | Ops | PSI-based tracker, alerted via Grafana → email and optional Slack when it crosses the configured `0.60` alert threshold for 2 minutes |
+| Prediction drift | Ops | Primary PSI tracker plus optional parallel Evidently reports; Grafana alerts when primary PSI crosses `0.60` for 2 minutes |
 
 See [docs/methodology_phase1.md](docs/methodology_phase1.md) for modeling detail and [docs/methodology_phase2.md](docs/methodology_phase2.md) for the MLOps pipeline.
 
@@ -169,8 +169,8 @@ A few things worth knowing:
   controls the classifier head and the pretrained backbone uses one tenth of it.
   The Streamlit form also exposes seed, early-stopping patience, weight decay and
   AMP; image retraining additionally exposes label smoothing and classifier dropout.
-  Architecture and input size/token length are visible but read-only because the
-  production serving bundle depends on those contracts.
+  Architecture, input size/token length and feature dimension are visible but
+  read-only because the production serving bundle depends on those contracts.
 - MLflow's artifact store is MinIO (S3-compatible), not a bind-mounted directory, so the
   `trainer` container never needs storage credentials — only `MLFLOW_TRACKING_URI`.
 - Airflow talks to `docker-socket-proxy`, not the raw host Docker socket, so
@@ -202,7 +202,41 @@ The API exposes Prometheus metrics at `/metrics` (`prometheus-fastapi-instrument
 - Scored over the last 200 predictions (in-memory, resets on API restart); the current local-demo threshold starts scoring after 5 predictions (use 30+ in production)
 - Exposed as Prometheus gauges `prediction_drift_psi` / `prediction_drift_window_size`, and alerted on in Grafana (`monitoring/grafana/provisioning/alerting/`) — the current local-demo alert fires when PSI stays above `0.60` for 2 minutes. Email is the safe default route; the Grafana entrypoint adds the Slack contact point and route only when `SLACK_WEBHOOK_URL` is non-empty (see `.env.example`). PSI is not itself a percentage; `0.60` is the numeric threshold corresponding to the requested “60%” setting.
 
-Not covered yet: input-feature drift, live model-performance decay against real ground truth, Airflow pipeline-failure alerts, data-quality checks, and infra-resource alerts. See the Streamlit app's Monitoring page for the full breakdown of what's built vs. open.
+The optional Evidently profile covers summary-level input drift for text lengths and image
+presence. Full semantic text/image-embedding drift, live model-performance decay against real
+ground truth, Airflow pipeline-failure alerts, comprehensive data-quality checks, and
+infra-resource alerts are not covered yet. See the Streamlit app's Monitoring page for the full
+breakdown.
+
+### Optional parallel Evidently monitor
+
+Evidently is deliberately isolated from live inference. FastAPI continues to calculate its
+existing in-memory PSI and returns predictions even if Evidently, PostgreSQL event logging, or
+MinIO report upload is unavailable. After each successful prediction, a background task stores
+only privacy-safe monitoring features in `api.prediction_events`: predicted category,
+confidence, text lengths, image presence/dimensions, fusion mode, and deployed model version.
+Raw text and image content are not stored.
+
+Start the optional profile separately:
+
+```bash
+make evidently-up
+```
+
+The monitor compares the latest production window with
+`outputs/image_modeling/train_split.csv`. If that DVC-managed split is unavailable, it falls
+back to `src/api/reference_class_distribution.json` and still evaluates prediction drift.
+It produces:
+
+- HTML report: http://localhost:8002/reports/latest.html
+- JSON report: http://localhost:8002/reports/latest.json
+- Prometheus metrics: http://localhost:8002/metrics
+- Persistent copies: Docker volume `evidently_reports` and MinIO bucket `evidently-reports`
+- Grafana panels: monitor health, dataset drift share, and per-column PSI
+
+The demo evaluates after five persisted predictions. Set
+`EVIDENTLY_MIN_CURRENT_ROWS=30` or higher for a less noisy production baseline. Stop only the
+optional monitor with `make evidently-down`; the original PSI path remains running.
 
 ---
 
@@ -229,7 +263,7 @@ Not covered yet: input-feature drift, live model-performance decay against real 
 
 ```
 .
-├── docker-compose.yaml              # API + Streamlit + MLflow + MinIO + Postgres + Prometheus + Grafana
+├── docker-compose.yaml              # Main stack + optional Evidently profile
 ├── pyproject.toml                   # Python dependencies (uv) — dev/training env
 ├── Makefile                         # make up / airflow-up / test / health / restart-all shortcuts
 ├── .github/workflows/ci.yml         # pytest + Docker build checks on push/PR
@@ -271,9 +305,14 @@ Not covered yet: input-feature drift, live model-performance decay against real 
 │       ├── Dockerfile
 │       └── requirements.txt
 │
-├── streamlit_app/
-│   ├── Home.py                      # Login + Prediction + Retrain (admin) UI
+├── streamlit_app/                   # Unified Streamlit UI (Felix app is the base)
+│   ├── Home.py                      # Single entry point: story, prediction and retrain
 │   ├── project_story.py             # Walkthrough pages: Overview/Data/Tracking/Orchestration/Monitoring/Links
+│   ├── architecture.svg/.png             # Vector UI diagram + 2x PNG export
+│   ├── airflow_dag_tasks_flow.svg/.png    # Airflow task flow
+│   ├── retrain_trigger_flow.svg/.png      # Retrain trigger flow
+│   ├── promotion_dag_flow.svg/.png        # Candidate-to-champion DAG flow
+│   ├── promotion_hot_reload_flow.svg/.png # Promotion and API hot-reload flow
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── services/
@@ -281,6 +320,7 @@ Not covered yet: input-feature drift, live model-performance decay against real 
 │
 ├── monitoring/
 │   ├── prometheus/prometheus.yml     # Scrapes api /metrics (docker + manual-up targets)
+│   ├── evidently/                    # Optional out-of-band drift monitor + reports
 │   └── grafana/
 │       ├── dashboards/                # Auto-provisioned "Rakuten API Overview" dashboard
 │       └── provisioning/alerting/     # Prediction-drift rule and safe default email routing
@@ -348,7 +388,8 @@ train-validation split under `outputs/image_modeling/`.
 make up
 ```
 
-This starts Postgres, Adminer, MinIO, MLflow, API, Streamlit, Prometheus and Grafana.
+This starts Postgres, Adminer, MinIO, MLflow, API, the unified Streamlit app,
+Prometheus and Grafana.
 Compose waits for dependency health checks, so API and Streamlit do not race Postgres.
 On macOS, the Makefile starts Docker Desktop first if necessary and waits up to two minutes.
 
@@ -372,7 +413,7 @@ cd airflow_dst && docker compose ps
 
 | Service | URL / credentials |
 |---------|-------------------|
-| Streamlit | http://localhost:8501 |
+| Streamlit (unified application) | http://localhost:8501 |
 | FastAPI | http://localhost:8000 |
 | OpenAPI docs | http://localhost:8000/docs |
 | MLflow | http://localhost:5001 |
@@ -381,6 +422,7 @@ cd airflow_dst && docker compose ps
 | MinIO console | http://localhost:9001 (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`) |
+| Evidently report (optional) | http://localhost:8002/reports/latest.html (`make evidently-up`) |
 
 Application users are seeded by the API on first startup. Passwords are stored as salted
 PBKDF2-HMAC-SHA256 hashes in the `api` database.
@@ -507,6 +549,9 @@ Run these commands from the repository root:
 | `make restart-all` | Stops and starts both stacks. |
 | `make logs` | Follows root-stack container logs. |
 | `make airflow-logs` | Follows Airflow logs. |
+| `make evidently-up` | Rebuilds the API event schema and starts the optional parallel Evidently monitor. |
+| `make evidently-down` | Stops only the optional Evidently monitor; primary PSI stays active. |
+| `make evidently-logs` | Follows the optional Evidently monitor logs. |
 | `make health` | Checks MLflow, API and Streamlit health endpoints. |
 | `make test` | Runs the complete pytest suite through `uv`. |
 | `make manual-up` | Runs MLflow, API and Streamlit as local processes; Postgres still uses Docker. |
@@ -526,7 +571,7 @@ make test
 uv run pytest tests/ -v
 ```
 
-The suite currently contains **57 tests** across five files:
+The suite currently contains **59 tests** across five files:
 
 | File | Coverage |
 |------|----------|
@@ -560,8 +605,8 @@ Registry artifacts. These files must not be mixed together or committed to Git.
 
 1. Create a feature branch and push it to the GitHub `origin` remote.
 2. Open a pull request targeting `main`.
-3. GitHub Actions installs the locked dependencies and runs all 57 tests.
-4. Only after tests pass, it builds `api`, `streamlit`, `airflow`, `trainer` and `promotion` images.
+3. GitHub Actions installs the locked dependencies and runs all 59 tests.
+4. Only after tests pass, it builds `api`, `streamlit`, `airflow`, `trainer`, `promotion` and optional `evidently` images.
 5. PR builds do **not** push images to a registry.
 6. Require this workflow in the `main` branch protection rules before merging.
 
@@ -675,7 +720,11 @@ Known gaps, not yet built:
 - ~35% missing descriptions  
 - Raw data and images are stored locally under `data/raw/` (not committed to git)
 
-## Manuel start
+## Manual start (without Docker)
 
-.venv/bin/uvicorn src.api.main:app --reload --port 8000
-.venv/bin/streamlit run streamlit_app/Home.py
+`make manual-up` (see [Makefile command reference](#makefile-command-reference)) runs
+MLflow, the API and the main Streamlit app as local processes against the same Postgres
+container, for iterating without rebuilding images. `make manual-down` stops them.
+
+The manual stack uses the same single entry point, `streamlit_app/Home.py`, and serves
+it at http://localhost:8501.

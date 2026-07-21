@@ -83,12 +83,22 @@ def main() -> None:
             "seed":                    config.SEED,
             "max_length":              config.MAX_LENGTH,
             "batch_size":              config.BATCH_SIZE,
+            "num_workers":             config.NUM_WORKERS,
             "max_epochs":              config.MAX_EPOCHS,
             "early_stopping_patience": config.EARLY_STOPPING_PATIENCE,
             "learning_rate":           config.LEARNING_RATE,
             "weight_decay":            config.WEIGHT_DECAY,
             "feature_dim":             config.FEATURE_DIM,
             "use_amp":                 config.USE_AMP,
+            "scheduler_mode":          config.SCHEDULER_MODE,
+            "scheduler_factor":        config.SCHEDULER_FACTOR,
+            "scheduler_patience":      config.SCHEDULER_PATIENCE,
+            "scheduler_min_lr":        config.SCHEDULER_MIN_LR,
+            "export_features":         config.EXPORT_FEATURES,
+            "resume_training":         config.RESUME_TRAINING,
+            "checkpoint_source":       config.CHECKPOINT_SOURCE,
+            "train_rows_override":     config.TRAIN_ROWS_OVERRIDE,
+            "val_rows_override":       config.VAL_ROWS_OVERRIDE,
         })
         _mlflow_active = True
     except Exception as _e:
